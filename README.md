@@ -88,6 +88,6 @@ export JWT_SECRET=local-dev-secret-at-least-32-bytes-long
 
 - `main`(배포) ← `dev`(통합, 기본 브랜치) ← `feat/<기능ID>-<설명>` (예: `feat/C-03-role-filter`)
 - 커밋·PR 제목: `feat(C-03): 점주 경로 역할 확인`
-- 승인 없이 담당자가 PR을 직접 합친다. 작업 브랜치 → `dev`는 Squash merge, `dev` → `main`은 Merge commit.
+- PR·승인은 필수가 아니다. 담당자가 `dev`·`main`에 직접 push해도 된다. PR을 쓸 때는 작업 브랜치 → `dev`는 Squash merge, `dev` → `main`은 Merge commit.
 
 자세한 규칙은 [.github 레포](https://github.com/sesac-freshlink/.github)를 참고한다.
