@@ -1,0 +1,10 @@
+# gateway 기본 설정 (뼈대). 실제 값은 환경 변수나 Kubernetes Secret으로 넣는다.
+server:
+  port: 8080
+
+spring:
+  application:
+    name: gateway
+
+# 라우팅 규칙은 README의 '라우팅 표'를 기준으로 채운다.
+# JWT 서명 키는 member-service와 공유하는 HS256 키 (환경 변수 JWT_SECRET)
