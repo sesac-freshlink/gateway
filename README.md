@@ -90,21 +90,20 @@ gateway/
 └── src/test/java/com/freshlink/gateway/
 ```
 
-## 5. 로컬에서 실행하기
+## 5. dev 환경에서 실행하기
 
 > 아직 뼈대만 있는 상태다. 첫 작업으로 [Spring Initializr](https://start.spring.io)에서 Gradle·Java 21·Spring Cloud Gateway로 프로젝트를 만들고 이 구조에 맞춰 넣는다.
 
-1. [local-dev](https://github.com/sesac-freshlink/local-dev) 레포에서 `docker compose up -d` (MySQL + LocalStack)
-2. member-service, inventory-service, order-service를 띄운다
-3. 이 레포에서
+개발할 때도 AWS dev 환경의 RDS·SQS·Cognito를 그대로 쓴다. AWS 로그인, DB 포트 포워딩(SSM), 개인 큐 설정은 [개발 환경 접속 가이드](https://github.com/sesac-freshlink/.github/blob/main/docs/개발환경-접속.md)를 따른다.
 
 ```bash
-export COGNITO_ISSUER_URI=https://cognito-idp.ap-northeast-2.amazonaws.com/<개발용 UserPoolId>
-export COGNITO_CLIENT_ID=<앱 클라이언트 ID>
+export SPRING_PROFILES_ACTIVE=dev
+export COGNITO_ISSUER_URI=https://cognito-idp.ap-northeast-2.amazonaws.com/<dev UserPoolId>
+export COGNITO_CLIENT_ID=<dev 앱 클라이언트 ID>
 ./gradlew bootRun
 ```
 
-`http://localhost:8080/api/...`으로 요청하면 각 서비스로 전달된다. Cognito는 LocalStack 무료판에서 흉내 낼 수 없으므로 로컬에서도 개발용 User Pool(Terraform 유지 묶음, 항상 켜져 있음)을 그대로 쓴다. 토큰은 프론트에서 로그인하거나 `aws cognito-idp initiate-auth`로 받는다.
+뒤의 서비스는 dev 클러스터에 배포된 것을 쓴다. 토큰은 프론트에서 로그인하거나 `aws cognito-idp initiate-auth`로 받는다.
 
 ## 6. 브랜치와 기여
 
