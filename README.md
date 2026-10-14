@@ -7,7 +7,7 @@
 | 담당 | 김진아 |
 | 관련 기능 ID | C-03 역할별 권한 분리 |
 | 기술 | Java 21, Spring Boot 3, Spring Cloud Gateway, Spring Security OAuth2 Resource Server (Cognito JWKS, RS256) |
-| 관측성 | Actuator·Micrometer → Prometheus (`/actuator/prometheus`, 관리 포트 8081) · Micrometer Tracing → Zipkin · JSON 로그(traceId 포함) → Alloy → Loki ([gitops/platform/observability](https://github.com/sesac-freshlink/gitops/tree/main/platform/observability)) |
+| 관측성 | Actuator·Micrometer → Prometheus (앱 포트의 `/actuator/prometheus`, 관리 포트를 따로 두지 않는다. 쿠버네티스에서는 모든 컨테이너가 8080) · Micrometer Tracing → Zipkin · JSON 로그(traceId 포함) → Alloy → Loki ([gitops/platform/observability](https://github.com/sesac-freshlink/gitops/tree/main/platform/observability)) |
 | 배포 | GitHub Actions → ECR `freshlink/gateway` → ArgoCD → EKS (`freshlink` 네임스페이스, 파드 2개) |
 
 ---
@@ -51,6 +51,7 @@ flowchart LR
 4. **역할 1차 확인:** `/api/owner/**`는 `cognito:groups`에 `OWNER`가 있어야 통과, 아니면 `403`.
 5. **사용자 정보 전달:** 토큰에서 꺼낸 값을 헤더로 붙여 넘긴다. `sub` → `X-User-Id`, `cognito:groups` → `X-User-Role`, `custom:storeId` → `X-Store-Id`(점주만).
 6. **위조 헤더 제거:** 클라이언트가 보낸 `X-User-*`, `X-Store-Id`는 **먼저 지우고** 다시 채운다. 빠뜨리면 다른 사람인 척 요청할 수 있다.
+7. **Actuator 보호:** Actuator는 앱 포트(8080)에 있다. `/actuator/**`로 가는 라우트는 만들지 않고, 밖에서 온 `/actuator` 요청은 Spring Security로 막는다(health만 열거나 클러스터 안 요청만 허용). ALB·CloudFront는 `/api/*`만 이 게이트웨이로 넘긴다.
 
 '이 lot이 내 점포 것인가', '이 주문이 내 주문인가' 같은 **소유권 확인은 각 서비스가** 헤더와 DB를 비교해서 한다.
 

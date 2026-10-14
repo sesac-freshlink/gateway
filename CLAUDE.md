@@ -1,6 +1,6 @@
 # gateway - AI 작업 가이드
 
-> 모든 `/api/*` 요청의 입구. Spring Cloud Gateway로 라우팅하고 Cognito ID 토큰을 검증한 뒤 사용자 헤더를 붙여 서비스로 넘긴다. 담당: 김진아. 포트 8080.
+> 모든 `/api/*` 요청의 입구. Spring Cloud Gateway로 라우팅하고 Cognito ID 토큰을 검증한 뒤 사용자 헤더를 붙여 서비스로 넘긴다. 담당: 김진아. 포트 8080 (로컬·쿠버네티스 같음).
 
 ---
 
@@ -35,7 +35,7 @@
 ✅ 인증: gateway가 Cognito ID 토큰을 검증하고 X-User-Id(sub, UUID 문자열)·X-User-Role·X-Store-Id 헤더로 넘긴다. 서비스는 토큰을 다시 검증하지 않는다
 ✅ 실시간 재고: 점주 화면이 3초마다 GET /owner/inventory를 조회한다 (폴링)
 ✅ 주문 저장소 DynamoDB 도입은 검토 중, 미정. 어느 쪽도 가정하지 말고 사용자에게 묻는다
-✅ 관측성(서비스·gateway): Actuator(관리 포트 8081, health·prometheus), Micrometer Tracing → Zipkin, JSON 로그(traceId)
+✅ 관측성(서비스·gateway): Actuator는 앱 포트에 둔다 (관리 포트 따로 없음, management.server.port 쓰지 않음). 쿠버네티스는 모든 컨테이너 8080, 로컬은 서비스별 8080~8084. health(liveness·readiness)·prometheus, Micrometer Tracing → Zipkin, JSON 로그(traceId)
 ✅ 배포 설정(gitops values, IRSA, 큐)은 이 레포에서 고치지 않는다 → freshlink-infra 담당에게 알린다
 ```
 
@@ -51,6 +51,8 @@
 ✅ 클라이언트가 보낸 X-User-Id·X-User-Role·X-Store-Id는 먼저 지우고 토큰 값으로 다시 채운다
 ✅ 라우팅은 README 라우팅 표 기준, /api 접두사를 떼고 넘긴다. 소유권 확인은 서비스 몫
 ⛔ 토큰 원문·Authorization 헤더를 로그에 남기지 않는다
+⛔ /actuator/** 라우트를 만들지 않는다. gateway 자신의 /actuator도 같은 8080에 있으므로 외부 요청은 Spring Security로 막는다 (health만 열거나 클러스터 안 요청만 허용)
+✅ ALB Ingress·CloudFront는 /api/*만 gateway로 넘긴다 (infra·gitops 몫, 바뀌면 확인)
 ```
 
 라우트·헤더 이름·그룹 이름을 바꾸면 frontend(`claims.ts`, `api.ts`), 서비스 레포, infra `modules/cognito`가 같이 바뀌어야 한다. 작업 전 사용자에게 알린다.
