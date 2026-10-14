@@ -33,7 +33,7 @@
 ⛔ 커밋·push·PR은 사용자가 요청할 때만
 ✅ Java 21, Spring Boot 3, Gradle(./gradlew). 아직 뼈대면 README "로컬에서 실행하기" 안내대로 프로젝트를 만든다
 ✅ 인증: gateway가 Cognito ID 토큰을 검증하고 X-User-Id(sub, UUID 문자열)·X-User-Role·X-Store-Id 헤더로 넘긴다. 서비스는 토큰을 다시 검증하지 않는다
-✅ 실시간 재고는 MVP에서 3초 폴링. SSE·WebSocket·Redis는 만들지 않는다 (2순위)
+✅ 실시간 재고: 점주 화면이 3초마다 GET /owner/inventory를 조회한다 (폴링)
 ✅ 주문 저장소 DynamoDB 도입은 검토 중, 미정. 어느 쪽도 가정하지 말고 사용자에게 묻는다
 ✅ 관측성(서비스·gateway): Actuator(관리 포트 8081, health·prometheus), Micrometer Tracing → Zipkin, JSON 로그(traceId)
 ✅ 배포 설정(gitops values, IRSA, 큐)은 이 레포에서 고치지 않는다 → freshlink-infra 담당에게 알린다
