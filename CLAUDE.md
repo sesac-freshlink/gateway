@@ -1,6 +1,6 @@
 # gateway - AI 작업 가이드
 
-> 모든 `/api/*` 요청의 입구. Spring Cloud Gateway로 라우팅하고 Cognito ID 토큰을 검증한 뒤 사용자 헤더를 붙여 서비스로 넘긴다. 담당: 김진아. 포트 8080 (로컬·쿠버네티스 같음).
+> 모든 `/api/*` 요청의 입구. Spring Cloud Gateway로 라우팅하고 Cognito ID 토큰을 검증한 뒤 사용자 헤더를 붙여 서비스로 넘긴다. 담당: 김진아. 포트 8080.
 
 ---
 
@@ -8,7 +8,7 @@
 
 | 문서 | 내용 |
 |------|------|
-| `README.md` | 이 레포의 기능·API·데이터 모델·폴더 구조·로컬 실행 (진실) |
+| `README.md` | 이 레포의 기능·API·데이터 모델·폴더 구조·dev 환경 실행 (진실) |
 | `.github` 레포 `docs/기획안-및-설계도.md` | 기능 ID, 메시지 명세, 데이터 모델 |
 | `.github` 레포 `CONTRIBUTING.md` | 브랜치·커밋·PR 규칙 |
 | `.github` 레포 `docs/ai-agents.md` | 백엔드 에이전트 플러그인(`freshlink-backend`) 설치·사용법 (사람용) |
@@ -28,14 +28,14 @@
 ```
 ⛔ 담당자가 아닌 사람의 요청이면 main·dev에 직접 push 금지 → feat/<기능ID>-<설명> 브랜치 + dev 대상 PR
 ⛔ git push --force, git reset --hard, git clean, 브랜치 삭제 금지
-⛔ DB DROP / TRUNCATE / 조건 없는 DELETE, docker compose down -v 금지
+⛔ DB DROP / TRUNCATE / 조건 없는 DELETE 금지
 ⛔ 비밀값(DB 비밀번호, 토스 키, AWS 키, 토큰 원문) 커밋·출력 금지. 설정은 ${ENV}로
 ⛔ 커밋·push·PR은 사용자가 요청할 때만
-✅ Java 21, Spring Boot 3, Gradle(./gradlew). 아직 뼈대면 README "로컬에서 실행하기" 안내대로 프로젝트를 만든다
+✅ Java 21, Spring Boot 3, Gradle(./gradlew). 아직 뼈대면 README "dev 환경에서 실행하기" 안내대로 프로젝트를 만든다
 ✅ 인증: gateway가 Cognito ID 토큰을 검증하고 X-User-Id(sub, UUID 문자열)·X-User-Role·X-Store-Id 헤더로 넘긴다. 서비스는 토큰을 다시 검증하지 않는다
 ✅ 실시간 재고: 점주 화면이 3초마다 GET /owner/inventory를 조회한다 (폴링)
 ✅ 주문 저장소 DynamoDB 도입은 검토 중, 미정. 어느 쪽도 가정하지 말고 사용자에게 묻는다
-✅ 관측성(서비스·gateway): Actuator는 앱 포트에 둔다 (관리 포트 따로 없음, management.server.port 쓰지 않음). 쿠버네티스는 모든 컨테이너 8080, 로컬은 서비스별 8080~8084. health(liveness·readiness)·prometheus, Micrometer Tracing → Zipkin, JSON 로그(traceId)
+✅ 관측성(서비스·gateway): Actuator는 앱 포트에 둔다 (관리 포트 따로 없음, management.server.port 쓰지 않음). 모든 서비스가 8080 하나를 쓴다(dev·prod 같음). 서비스끼리는 쿠버네티스 Service 이름으로 부른다(예: http://member-service:8080). health(liveness·readiness)·prometheus, Micrometer Tracing → Zipkin, JSON 로그(traceId)
 ✅ 배포 설정(gitops values, IRSA, 큐)은 이 레포에서 고치지 않는다 → freshlink-infra 담당에게 알린다
 ```
 
