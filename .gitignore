@@ -37,10 +37,9 @@ Thumbs.db
 *.log
 logs/
 
-# 로컬 비밀값 (절대 커밋하지 않는다)
+# 개인 비밀값 (절대 커밋하지 않는다)
 .env
-*.env.local
-application-local.yml
+*.env
 application-secret.yml
 
 # Claude Code 에이전트 작업 파일
