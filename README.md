@@ -6,7 +6,7 @@
 | --- | --- |
 | 담당 | 김진아 |
 | 관련 기능 ID | C-03 역할별 권한 분리 |
-| 기술 | Java 21, Spring Boot 3, Spring Cloud Gateway, Spring Security OAuth2 Resource Server (Cognito JWKS, RS256) |
+| 기술 | Java 21, Spring Boot 4.0.x, Spring Cloud Gateway(Spring Cloud 2025.1.x), Spring Security OAuth2 Resource Server (Cognito JWKS, RS256) |
 | 관측성 | Actuator·Micrometer → Prometheus (앱 포트의 `/actuator/prometheus`, 관리 포트를 따로 두지 않는다. 모든 서비스가 8080) · Micrometer Tracing → Zipkin · JSON 로그(traceId 포함) → Alloy → Loki ([gitops/platform/observability](https://github.com/sesac-freshlink/gitops/tree/main/platform/observability)) |
 | 배포 | GitHub Actions → ECR `freshlink/gateway` → ArgoCD → EKS (`freshlink` 네임스페이스, 파드 2개) |
 

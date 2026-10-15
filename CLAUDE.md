@@ -31,7 +31,7 @@
 ⛔ DB DROP / TRUNCATE / 조건 없는 DELETE 금지
 ⛔ 비밀값(DB 비밀번호, 토스 키, AWS 키, 토큰 원문) 커밋·출력 금지. 설정은 ${ENV}로
 ⛔ 커밋·push·PR은 사용자가 요청할 때만
-✅ Java 21, Spring Boot 3, Gradle(./gradlew). 아직 뼈대면 README "dev 환경에서 실행하기" 안내대로 프로젝트를 만든다
+✅ Java 21, Spring Boot 4.0.x, Jackson 3, Gradle 9(./gradlew). 프로필은 dev·prod만. 기준은 `.github` 레포 docs/백엔드-공통작업-인수인계.md 1장. 아직 뼈대면 README "dev 환경에서 실행하기" 안내대로 프로젝트를 만든다
 ✅ 인증: gateway가 Cognito ID 토큰을 검증하고 X-User-Id(sub, UUID 문자열)·X-User-Role·X-Store-Id 헤더로 넘긴다. 서비스는 토큰을 다시 검증하지 않는다
 ✅ 실시간 재고: 점주 화면이 3초마다 GET /owner/inventory를 조회한다 (폴링)
 ✅ 주문 저장소 DynamoDB 도입은 검토 중, 미정. 어느 쪽도 가정하지 말고 사용자에게 묻는다
