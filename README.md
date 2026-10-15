@@ -6,7 +6,7 @@
 | --- | --- |
 | 담당 | 김진아 |
 | 관련 기능 ID | C-03 역할별 권한 분리 |
-| 기술 | Java 21, Spring Boot 4.0.x, Spring Cloud Gateway(Spring Cloud 2025.1.x), Spring Security OAuth2 Resource Server (Cognito JWKS, RS256) |
+| 기술 | Java 21, Spring Boot 4.0.x, Spring Cloud Gateway **WebMVC**(서블릿판, Spring Cloud 2025.1.x), Spring Security OAuth2 Resource Server (Cognito JWKS, RS256) |
 | 관측성 | Actuator·Micrometer → Prometheus (앱 포트의 `/actuator/prometheus`, 관리 포트를 따로 두지 않는다. 모든 서비스가 8080) · Micrometer Tracing → Zipkin · JSON 로그(traceId 포함) → Alloy → Loki ([gitops/platform/observability](https://github.com/sesac-freshlink/gitops/tree/main/platform/observability)) |
 | 배포 | GitHub Actions → ECR `freshlink/gateway` → ArgoCD → EKS (`freshlink` 네임스페이스, 파드 2개) |
 
@@ -82,17 +82,27 @@ spring:
 
 ```
 gateway/
+├── build.gradle                       # Boot 4.0.8, Spring Cloud 2025.1.3, Gateway WebMVC + Actuator
 ├── src/main/java/com/freshlink/gateway/
+│   ├── GatewayApplication.java
 │   ├── config/      # 라우팅 설정
-│   ├── filter/      # 위조 헤더 제거, 사용자 헤더 주입 필터
+│   ├── filter/      # 위조 헤더 제거, 사용자 헤더 주입 필터 (서블릿 Filter)
 │   └── security/    # Cognito JWT 검증(Resource Server), 공개 경로·역할 규칙
-├── src/main/resources/application.yml
+├── src/main/resources/
+│   ├── application.yml                # 공통. 값은 환경 변수
+│   ├── application-dev.yml            # 로그 레벨만 다름
+│   └── application-prod.yml
 └── src/test/java/com/freshlink/gateway/
+    └── GatewayApplicationTests.java   # 애플리케이션이 뜨는지
 ```
+
+### Gateway WebMVC판을 쓰는 이유 (2026-10-15 팀 합의)
+
+Spring Cloud Gateway는 WebFlux(리액티브)판과 WebMVC(서블릿)판 두 가지가 있다. 처음에는 WebFlux판으로 적었으나, 팀이 배운 기술은 서블릿 기반 Spring MVC이고 서비스 3개도 같은 바탕이라 WebMVC판으로 바꿨다. 라우팅·필터·토큰 검증 기능은 같고, 코드는 평소 `Filter`·`SecurityFilterChain`을 그대로 쓴다. `Mono`·`Flux`를 쓰지 않는다. 설정 키는 `spring.cloud.gateway.server.webmvc.*`다 (`server.webflux`가 아니다).
 
 ## 5. dev 환경에서 실행하기
 
-> 아직 뼈대만 있는 상태다. 첫 작업으로 [Spring Initializr](https://start.spring.io)에서 Gradle·Java 21·Spring Cloud Gateway로 프로젝트를 만들고 이 구조에 맞춰 넣는다.
+> Spring 뼈대(의존성·`GatewayApplication`·뜨는지 테스트)까지 들어 있다. 라우팅·토큰 검증 코드는 없다. DB가 없으므로 IntelliJ에서 `GatewayApplication`을 바로 실행하면 8080에서 `/actuator/health`가 응답한다.
 
 개발할 때도 AWS dev 환경의 RDS·SQS·Cognito를 그대로 쓴다. AWS 로그인, DB 포트 포워딩(SSM), 개인 큐 설정은 [개발 환경 접속 가이드](https://github.com/sesac-freshlink/.github/blob/main/docs/개발환경-접속.md)를 따른다.
 

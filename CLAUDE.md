@@ -44,7 +44,7 @@
 ## 이 레포 규칙
 
 ```
-✅ WebFlux(리액티브) 기반. Servlet API(HttpServletRequest, OncePerRequestFilter) 쓰지 않는다
+✅ Spring Cloud Gateway WebMVC(서블릿) 기반. 서비스 3개와 같은 바탕이라 Servlet API(HttpServletRequest, OncePerRequestFilter)를 그대로 쓴다. WebFlux(Mono·Flux) 쓰지 않는다 (10/15 팀 합의)
 ✅ 토큰 검증: issuer-uri(${COGNITO_ISSUER_URI})로 JWKS, RS256·exp·iss + token_use = id + aud = ${COGNITO_CLIENT_ID}. 공유 비밀 키 금지
 ✅ /api/owner/** 는 cognito:groups에 OWNER 필요 (없으면 403, 토큰 문제는 401)
 ✅ 공개 경로는 점포 검색·점포 상품 목록만 (README 3장). 넓히지 않는다

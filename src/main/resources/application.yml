@@ -1,13 +1,26 @@
 # gateway 기본 설정 (뼈대). 실제 값은 환경 변수로 넣는다.
+# 프로필은 dev·prod 두 개. SPRING_PROFILES_ACTIVE로 고른다.
 server:
   port: 8080
 
 spring:
   application:
     name: gateway
+  jackson:
+    time-zone: Asia/Seoul         # 시각은 ISO-8601 +09:00
 
 # 라우팅 규칙은 README의 '라우팅 표'를 기준으로 채운다.
 # JWT는 Amazon Cognito가 RS256으로 서명한다. 공유 비밀 키 없이 Cognito 공개 키(JWKS)로 검증한다.
 # 검증 설정 예시 (README 'JWT 규칙'):
 #   spring.security.oauth2.resourceserver.jwt.issuer-uri: ${COGNITO_ISSUER_URI}
 #   앱 클라이언트 확인용: ${COGNITO_CLIENT_ID}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health, prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true             # /actuator/health/liveness, /readiness
