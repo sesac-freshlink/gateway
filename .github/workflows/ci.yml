@@ -1,10 +1,11 @@
 # CI (할 일 8). 실제 단계는 .github 레포의 재사용 워크플로 spring-build.yml에 있다.
 # PR: 빌드·테스트만. dev push(또는 dev에서 수동 실행): ECR 이미지(태그 = 커밋 7자리) + gitops envs/dev 태그 커밋 → ArgoCD 배포
+# main push(release PR을 Merge commit으로 합침, 또는 main에서 수동 실행): 빌드 없이 합친 dev 커밋의 이미지 태그를 gitops envs/prod에 커밋 → prod 배포
 name: ci
 
 on:
   push:
-    branches: [dev]
+    branches: [dev, main]
   pull_request:
     branches: [dev, main]
   workflow_dispatch:
