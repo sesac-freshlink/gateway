@@ -22,8 +22,8 @@ import static org.springframework.security.web.servlet.util.matcher.PathPatternR
  * 경로별 인증·역할 규칙 (API 명세 'Gateway 라우팅' 시트, README 3장).
  * <ul>
  *   <li>공개: 점포 상품 목록, 점포 검색, 닉네임 중복 확인(GET만)</li>
- *   <li>/api/admin/** 은 ADMIN, /api/owner/** 는 OWNER. 그룹이 없으면 403</li>
- *   <li>나머지 /api/** 는 로그인만 확인(CUSTOMER 확인은 서비스 몫)</li>
+ *   <li>/api/admin/** 은 ADMIN, /api/owner/** 는 OWNER, /api/orders/** 는 CUSTOMER. 그룹이 없으면 403</li>
+ *   <li>나머지 /api/** 는 로그인만 확인</li>
  *   <li>/actuator/** 는 클러스터 안(probe·Prometheus·ALB 상태 확인)에서만. ALB·CloudFront를 거친 요청(X-Forwarded-For 있음)은 막는다</li>
  *   <li>그 밖의 경로(/ops/** 등)는 전부 막는다</li>
  * </ul>
@@ -55,6 +55,7 @@ public class SecurityConfig {
                                 "/api/members/nickname-availability").permitAll()
                         .requestMatchers("/api/admin/**").hasRole("ADMIN")
                         .requestMatchers("/api/owner/**").hasRole("OWNER")
+                        .requestMatchers("/api/orders/**").hasRole("CUSTOMER")
                         .requestMatchers("/api/**").authenticated()
                         .anyRequest().denyAll())
                 .oauth2ResourceServer(oauth -> oauth
