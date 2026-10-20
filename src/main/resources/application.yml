@@ -77,3 +77,13 @@ management:
     health:
       probes:
         enabled: true             # /actuator/health/liveness, /readiness
+  # 추적(할 일 16). 요청마다 traceId를 만들어 로그에 넣고, 서비스로 넘길 때 traceparent 헤더를 붙인다.
+  # PC에는 Zipkin이 없어서 보내지 않는다. 클러스터에서는 gitops 차트(spring-service)가 환경 변수로 켜고 주소를 넣는다:
+  #   MANAGEMENT_TRACING_EXPORT_ZIPKIN_ENABLED=true, MANAGEMENT_TRACING_EXPORT_ZIPKIN_ENDPOINT=http://zipkin.observability:9411/api/v2/spans
+  # JSON 로그(LOGGING_STRUCTURED_FORMAT_CONSOLE=ecs)도 차트가 넣는다. PC 로그는 사람이 읽는 형식 그대로다.
+  tracing:
+    sampling:
+      probability: 1.0            # MVP는 요청이 적어 전부 기록
+    export:
+      zipkin:
+        enabled: false

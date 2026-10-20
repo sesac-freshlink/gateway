@@ -237,6 +237,22 @@ class GatewayApplicationTests {
         assertThat(admin.get("path").asText()).isEqualTo("/admin/stores");
     }
 
+    // ------------------------------------------------------------------ 추적 (할 일 16)
+
+    @Test
+    @DisplayName("서비스로 넘길 때 traceparent를 붙이고, 들어온 추적을 잇는다")
+    void tracing_traceparentForwarded() throws Exception {
+        List<String> fresh = header(seen(get("/api/stores/1/products", null, Map.of())), "traceparent");
+        assertThat(fresh).hasSize(1);
+        assertThat(fresh.get(0)).matches("00-[0-9a-f]{32}-[0-9a-f]{16}-01");
+
+        String traceId = "4bf92f3577b34da6a3ce929d0e0e4736";
+        List<String> joined = header(seen(get("/api/stores/1/products", null,
+                Map.of("traceparent", "00-" + traceId + "-00f067aa0ba902b7-01"))), "traceparent");
+        assertThat(joined).hasSize(1);
+        assertThat(joined.get(0)).startsWith("00-" + traceId + "-");
+    }
+
     // ------------------------------------------------------------------ actuator·그 밖
 
     @Test
