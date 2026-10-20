@@ -15,7 +15,7 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
-  contents: read
+  contents: write  # main 승격 때 날짜 태그·GitHub Release 만들기 (.github spring-build promote)
   packages: read
   id-token: write
 
