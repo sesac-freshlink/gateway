@@ -54,7 +54,7 @@ spring:
                 - Path=/api/owner/orders
               filters:
                 - StripPrefix=1
-            - id: order-orders                      # 9. 로그인(CUSTOMER 확인은 서비스)
+            - id: order-orders                      # 9. CUSTOMER
               uri: ${ORDER_SERVICE_URI:http://order-service:8080}
               predicates:
                 - Path=/api/orders/**

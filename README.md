@@ -49,14 +49,14 @@ flowchart LR
    | 5 | `/api/admin/**` | 전부 | member-service | 로그인 | ADMIN |
    | 6 | `/api/owner/inventory/**`, `/api/owner/disposals` | 전부 | inventory-service | 로그인 | OWNER |
    | 7 | `/api/owner/orders` | 전부 | order-service | 로그인 | OWNER |
-   | 8 | `/api/orders/**` | 전부 | order-service | 로그인 | (CUSTOMER 확인은 서비스) |
+   | 8 | `/api/orders/**` | 전부 | order-service | 로그인 | CUSTOMER |
    | - | `/ops/**`, 그 밖의 경로 | - | 라우트 없음 | 막음 | |
 
    서비스 주소는 기본값이 쿠버네티스 Service 이름(`http://member-service:8080` 등)이고, `MEMBER_SERVICE_URI`·`INVENTORY_SERVICE_URI`·`ORDER_SERVICE_URI`로 바꿀 수 있다. `Idempotency-Key`·`Authorization` 같은 다른 헤더는 그대로 넘긴다.
 
 2. **공개 경로 예외:** 위 표의 GET 3개만 토큰 없이 통과시킨다. 같은 경로라도 GET이 아니면 로그인이 필요하다. 회원가입·로그인은 브라우저가 Cognito로 바로 가므로 gateway를 거치지 않는다.
 3. **토큰 검증:** Cognito 공개 키(JWKS)로 RS256 서명, 만료(`exp`), 발급자(`iss`), `token_use = id`, `aud`(= 앱 클라이언트 ID)를 확인한다. 하나라도 틀리면 `401`.
-4. **역할 1차 확인:** `/api/owner/**`는 `cognito:groups`에 `OWNER`, `/api/admin/**`는 `ADMIN`이 있어야 통과, 아니면 `403`.
+4. **역할 1차 확인:** `/api/owner/**`는 `cognito:groups`에 `OWNER`, `/api/admin/**`는 `ADMIN`, `/api/orders/**`는 `CUSTOMER`가 있어야 통과, 아니면 `403`.
 5. **사용자 정보 전달:** 토큰에서 꺼낸 값을 헤더로 붙여 넘긴다. `sub` → `X-User-Id`, `cognito:groups` → `X-User-Role`(그룹이 여럿이면 쉼표로 잇는다), `custom:storeId` → `X-Store-Id`(값이 있을 때만).
 6. **위조 헤더 제거:** 클라이언트가 보낸 `X-User-*`, `X-Store-Id`는 **먼저 지우고** 다시 채운다. 빠뜨리면 다른 사람인 척 요청할 수 있다.
 7. **Actuator 보호:** Actuator는 앱 포트(8080)에 있다. `/actuator/**`로 가는 라우트는 만들지 않는다. ALB·CloudFront를 거친 요청(`X-Forwarded-For` 헤더가 있음)은 `/actuator`를 막고(401), 클러스터 안 요청(probe, Prometheus, ALB 상태 확인)만 허용한다. ALB Ingress는 `/api`만 이 게이트웨이로 넘긴다.

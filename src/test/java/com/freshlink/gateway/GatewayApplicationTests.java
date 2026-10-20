@@ -147,6 +147,14 @@ class GatewayApplicationTests {
         assertThat(get("/api/admin/stores", owner("1"), Map.of()).statusCode()).isEqualTo(403);
     }
 
+    @Test
+    @DisplayName("고객이 아니면 주문 경로는 403")
+    void nonCustomerOnOrdersPath_403() throws Exception {
+        assertThat(get("/api/orders/1", owner("1"), Map.of()).statusCode()).isEqualTo(403);
+        assertThat(get("/api/orders", groupToken("ADMIN", null), Map.of()).statusCode()).isEqualTo(403);
+        assertThat(get("/api/orders/1", token(KEY, c -> { }), Map.of()).statusCode()).isEqualTo(403);
+    }
+
     // ------------------------------------------------------------------ 라우팅·헤더
 
     @Test
