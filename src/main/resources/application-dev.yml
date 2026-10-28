@@ -1,0 +1,4 @@
+# dev 환경. prod와 키가 같고 값은 환경 변수로 받는다. 주소·비밀번호를 여기 적지 않는다.
+logging:
+  level:
+    com.freshlink: DEBUG

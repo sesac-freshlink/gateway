@@ -6,9 +6,9 @@
 | --- | --- |
 | 담당 | 김진아 |
 | 관련 기능 ID | C-03 역할별 권한 분리 |
-| 기술 | Java 21, Spring Boot 3, Spring Cloud Gateway, Spring Security OAuth2 Resource Server (Cognito JWKS, RS256) |
-| 관측성 | Actuator·Micrometer → Prometheus (`/actuator/prometheus`, 관리 포트 8081) · Micrometer Tracing → Zipkin · JSON 로그(traceId 포함) → Alloy → Loki ([gitops/platform/observability](https://github.com/sesac-freshlink/gitops/tree/main/platform/observability)) |
-| 배포 | GitHub Actions → ECR `freshlink/gateway` → ArgoCD → EKS (`freshlink` 네임스페이스, 파드 2개) |
+| 기술 | Java 21, Spring Boot 4.0.x, Spring Cloud Gateway **WebMVC**(서블릿판, Spring Cloud 2025.1.x), Spring Security OAuth2 Resource Server (Cognito JWKS, RS256) |
+| 관측성 | Actuator·Micrometer → Prometheus (앱 포트의 `/actuator/prometheus`, 관리 포트를 따로 두지 않는다. 모든 서비스가 8080) · Micrometer Tracing → Zipkin · JSON 로그(traceId 포함) → Alloy → Loki ([gitops/platform/observability](https://github.com/sesac-freshlink/gitops/tree/main/platform/observability)) |
+| 배포 | GitHub Actions → ECR `gateway` → gitops → ArgoCD → EKS (`freshlink` 네임스페이스, 파드 2개) |
 
 ---
 
@@ -38,19 +38,30 @@ flowchart LR
 
 ## 3. 하는 일
 
-1. **라우팅**
+1. **라우팅** (`application.yml`, 위에서부터 먼저 매칭. 모두 `/api`를 떼고 넘긴다)
 
-   | 경로 | 보내는 곳 |
-   | --- | --- |
-   | `/api/members/**`, `/api/stores` | member-service |
-   | `/api/owner/inventory/**`, `/api/stores/{id}/products`, `/api/owner/disposals` | inventory-service |
-   | `/api/orders/**`, `/api/owner/orders` | order-service |
+   | 순서 | 경로 | 메서드 | 보내는 곳 | 인증 | 역할 (아니면 403) |
+   | --- | --- | --- | --- | --- | --- |
+   | 1 | `/api/stores/{storeId}/products` | GET | inventory-service | 공개 | |
+   | 2 | `/api/stores` | GET | member-service | 공개 | |
+   | 3 | `/api/members/nickname-availability` | GET | member-service | 공개 | |
+   | 4 | `/api/members/**` | 전부 | member-service | 로그인 | |
+   | 5 | `/api/admin/**` | 전부 | member-service | 로그인 | ADMIN |
+   | 6 | `/api/owner/inventory/**`, `/api/owner/disposals` | 전부 | inventory-service | 로그인 | OWNER |
+   | 7 | `/api/owner/orders` | 전부 | order-service | 로그인 | OWNER |
+   | 8 | `/api/orders/**` | 전부 | order-service | 로그인 | CUSTOMER |
+   | - | `/ops/**`, 그 밖의 경로 | - | 라우트 없음 | 막음 | |
 
-2. **공개 경로 예외:** 점포 검색, 점포 상품 목록은 토큰 없이 통과시킨다. 회원가입·로그인은 브라우저가 Cognito로 바로 가므로 gateway를 거치지 않는다.
+   서비스 주소는 기본값이 쿠버네티스 Service 이름(`http://member-service:8080` 등)이고, `MEMBER_SERVICE_URI`·`INVENTORY_SERVICE_URI`·`ORDER_SERVICE_URI`로 바꿀 수 있다. `Idempotency-Key`·`Authorization` 같은 다른 헤더는 그대로 넘긴다.
+
+2. **공개 경로 예외:** 위 표의 GET 3개만 토큰 없이 통과시킨다. 같은 경로라도 GET이 아니면 로그인이 필요하다. 회원가입·로그인은 브라우저가 Cognito로 바로 가므로 gateway를 거치지 않는다.
 3. **토큰 검증:** Cognito 공개 키(JWKS)로 RS256 서명, 만료(`exp`), 발급자(`iss`), `token_use = id`, `aud`(= 앱 클라이언트 ID)를 확인한다. 하나라도 틀리면 `401`.
-4. **역할 1차 확인:** `/api/owner/**`는 `cognito:groups`에 `OWNER`가 있어야 통과, 아니면 `403`.
-5. **사용자 정보 전달:** 토큰에서 꺼낸 값을 헤더로 붙여 넘긴다. `sub` → `X-User-Id`, `cognito:groups` → `X-User-Role`, `custom:storeId` → `X-Store-Id`(점주만).
+4. **역할 1차 확인:** `/api/owner/**`는 `cognito:groups`에 `OWNER`, `/api/admin/**`는 `ADMIN`, `/api/orders/**`는 `CUSTOMER`가 있어야 통과, 아니면 `403`.
+5. **사용자 정보 전달:** 토큰에서 꺼낸 값을 헤더로 붙여 넘긴다. `sub` → `X-User-Id`, `cognito:groups` → `X-User-Role`(그룹이 여럿이면 쉼표로 잇는다), `custom:storeId` → `X-Store-Id`(값이 있을 때만).
 6. **위조 헤더 제거:** 클라이언트가 보낸 `X-User-*`, `X-Store-Id`는 **먼저 지우고** 다시 채운다. 빠뜨리면 다른 사람인 척 요청할 수 있다.
+7. **Actuator 보호:** Actuator는 앱 포트(8080)에 있다. `/actuator/**`로 가는 라우트는 만들지 않는다. ALB·CloudFront를 거친 요청(`X-Forwarded-For` 헤더가 있음)은 `/actuator`를 막고(401), 클러스터 안 요청(probe, Prometheus, ALB 상태 확인)만 허용한다. ALB Ingress는 `/api`만 이 게이트웨이로 넘긴다.
+
+401·403 본문은 서비스와 같은 모양이다: `{"code":"UNAUTHORIZED","message":"로그인이 필요합니다","traceId":null}`, `{"code":"FORBIDDEN","message":"권한이 없습니다","traceId":null}`. `traceId`는 할 일 16(Micrometer Tracing → Zipkin)에서 채워진다.
 
 '이 lot이 내 점포 것인가', '이 주문이 내 주문인가' 같은 **소유권 확인은 각 서비스가** 헤더와 DB를 비교해서 한다.
 
@@ -66,44 +77,51 @@ flowchart LR
 
 `X-User-Id`는 숫자가 아니라 UUID 문자열이다. 뒤 서비스는 사용자 ID 칸을 `VARCHAR(36)`으로 둔다.
 
-Spring 설정은 이 정도면 된다. 공개 키를 받으러 밖으로 나가므로 파드가 NAT를 통해 Cognito에 닿아야 한다.
+설정은 환경 변수 두 개다. 클러스터에서는 infra가 ArgoCD root에 넘긴 값을 파드에 넣는다. 공개 키는 첫 요청 때 받아 캐시하므로 Cognito에 닿지 않아도 기동은 된다(파드는 NAT를 통해 Cognito에 닿는다).
 
 ```yaml
-spring:
-  security:
-    oauth2:
-      resourceserver:
-        jwt:
-          issuer-uri: ${COGNITO_ISSUER_URI}   # https://cognito-idp.ap-northeast-2.amazonaws.com/<UserPoolId>
+freshlink:
+  cognito:
+    issuer-uri: ${COGNITO_ISSUER_URI}   # https://cognito-idp.ap-northeast-2.amazonaws.com/<UserPoolId>
+    client-id: ${COGNITO_CLIENT_ID}     # 토큰 aud와 같아야 한다
 ```
 
 ## 4. 폴더 구조
 
 ```
 gateway/
+├── build.gradle                       # Boot 4.0.8, Spring Cloud 2025.1.3, Gateway WebMVC + Actuator
+├── .github/workflows/ci.yml          # CI 호출부 (.github 레포 spring-build.yml)
 ├── src/main/java/com/freshlink/gateway/
-│   ├── config/      # 라우팅 설정
-│   ├── filter/      # 위조 헤더 제거, 사용자 헤더 주입 필터
-│   └── security/    # Cognito JWT 검증(Resource Server), 공개 경로·역할 규칙
-├── src/main/resources/application.yml
+│   ├── GatewayApplication.java
+│   ├── filter/UserHeaderFilter.java   # 위조 헤더 제거, 사용자 헤더 주입
+│   └── security/    # SecurityConfig(공개 경로·역할 규칙), CognitoJwtValidators(iss·token_use·aud), CognitoProperties
+├── src/main/resources/
+│   ├── application.yml                # 라우팅 표, Cognito 값(환경 변수)
+│   ├── application-dev.yml            # 로그 레벨만 다름
+│   └── application-prod.yml
 └── src/test/java/com/freshlink/gateway/
+    └── GatewayApplicationTests.java   # 가짜 Cognito(JWKS)·가짜 서비스로 401·403·라우팅·위조 헤더 제거 확인
 ```
 
-## 5. 로컬에서 실행하기
+### Gateway WebMVC판을 쓰는 이유 (2026-10-15 팀 합의)
 
-> 아직 뼈대만 있는 상태다. 첫 작업으로 [Spring Initializr](https://start.spring.io)에서 Gradle·Java 21·Spring Cloud Gateway로 프로젝트를 만들고 이 구조에 맞춰 넣는다.
+Spring Cloud Gateway는 WebFlux(리액티브)판과 WebMVC(서블릿)판 두 가지가 있다. 처음에는 WebFlux판으로 적었으나, 팀이 배운 기술은 서블릿 기반 Spring MVC이고 서비스 3개도 같은 바탕이라 WebMVC판으로 바꿨다. 라우팅·필터·토큰 검증 기능은 같고, 코드는 평소 `Filter`·`SecurityFilterChain`을 그대로 쓴다. `Mono`·`Flux`를 쓰지 않는다. 설정 키는 `spring.cloud.gateway.server.webmvc.*`다 (`server.webflux`가 아니다).
 
-1. [local-dev](https://github.com/sesac-freshlink/local-dev) 레포에서 `docker compose up -d` (MySQL + LocalStack)
-2. member-service, inventory-service, order-service를 띄운다
-3. 이 레포에서
+## 5. dev 환경에서 실행하기
+
+> 라우팅·토큰 검증이 들어 있다. DB는 없지만 `COGNITO_ISSUER_URI`·`COGNITO_CLIENT_ID`가 없으면 뜨지 않는다. 뒤 서비스는 dev 클러스터에 있으므로 PC에서 띄우면 라우팅 대상(`http://member-service:8080` 등)에 닿지 않는다. 확인은 dev 클러스터에서 한다.
+
+개발할 때도 AWS dev 환경의 RDS·SQS·Cognito를 그대로 쓴다. AWS 로그인, DB 포트 포워딩(SSM), 개인 큐 설정은 [개발 환경 접속 가이드](https://github.com/sesac-freshlink/.github/blob/main/docs/개발환경-접속.md)를 따른다.
 
 ```bash
-export COGNITO_ISSUER_URI=https://cognito-idp.ap-northeast-2.amazonaws.com/<개발용 UserPoolId>
-export COGNITO_CLIENT_ID=<앱 클라이언트 ID>
+export SPRING_PROFILES_ACTIVE=dev
+export COGNITO_ISSUER_URI=https://cognito-idp.ap-northeast-2.amazonaws.com/<dev UserPoolId>
+export COGNITO_CLIENT_ID=<dev 앱 클라이언트 ID>
 ./gradlew bootRun
 ```
 
-`http://localhost:8080/api/...`으로 요청하면 각 서비스로 전달된다. Cognito는 LocalStack 무료판에서 흉내 낼 수 없으므로 로컬에서도 개발용 User Pool(Terraform 유지 묶음, 항상 켜져 있음)을 그대로 쓴다. 토큰은 프론트에서 로그인하거나 `aws cognito-idp initiate-auth`로 받는다.
+뒤의 서비스는 dev 클러스터에 배포된 것을 쓴다. 토큰은 프론트에서 로그인하거나 `aws cognito-idp initiate-auth`로 받는다.
 
 ## 6. 브랜치와 기여
 

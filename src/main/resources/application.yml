@@ -1,13 +1,89 @@
-# gateway 기본 설정 (뼈대). 실제 값은 환경 변수로 넣는다.
+# gateway 기본 설정. 실제 값은 환경 변수로 넣는다(클러스터에서는 gitops·ArgoCD가 넣는다).
+# 프로필은 dev·prod 두 개. SPRING_PROFILES_ACTIVE로 고른다.
 server:
   port: 8080
 
 spring:
   application:
     name: gateway
+  jackson:
+    time-zone: Asia/Seoul         # 시각은 ISO-8601 +09:00
+  cloud:
+    gateway:
+      server:
+        webmvc:
+          # 라우팅 표 (API 명세 'Gateway 라우팅' 시트, README 3장). 위에서부터 먼저 매칭한다.
+          # 모든 라우트가 /api를 떼고 넘긴다(StripPrefix=1). /ops/**, /actuator/** 라우트는 만들지 않는다.
+          # Idempotency-Key, Authorization 같은 다른 헤더는 그대로 넘긴다. 사용자 헤더는 UserHeaderFilter가 만든다.
+          routes:
+            - id: inventory-store-products          # 1. 공개. /api/stores보다 먼저
+              uri: ${INVENTORY_SERVICE_URI:http://inventory-service:8080}
+              predicates:
+                - Path=/api/stores/{storeId}/products
+                - Method=GET
+              filters:
+                - StripPrefix=1
+            - id: member-stores                     # 2. 공개
+              uri: ${MEMBER_SERVICE_URI:http://member-service:8080}
+              predicates:
+                - Path=/api/stores
+                - Method=GET
+              filters:
+                - StripPrefix=1
+            - id: member-members                    # 3·4. nickname-availability만 공개, 나머지 로그인
+              uri: ${MEMBER_SERVICE_URI:http://member-service:8080}
+              predicates:
+                - Path=/api/members/**
+              filters:
+                - StripPrefix=1
+            - id: member-admin                      # 5. ADMIN
+              uri: ${MEMBER_SERVICE_URI:http://member-service:8080}
+              predicates:
+                - Path=/api/admin/**
+              filters:
+                - StripPrefix=1
+            - id: inventory-owner                   # 6·7. OWNER
+              uri: ${INVENTORY_SERVICE_URI:http://inventory-service:8080}
+              predicates:
+                - Path=/api/owner/inventory/**,/api/owner/disposals
+              filters:
+                - StripPrefix=1
+            - id: order-owner                       # 8. OWNER
+              uri: ${ORDER_SERVICE_URI:http://order-service:8080}
+              predicates:
+                - Path=/api/owner/orders
+              filters:
+                - StripPrefix=1
+            - id: order-orders                      # 9. CUSTOMER
+              uri: ${ORDER_SERVICE_URI:http://order-service:8080}
+              predicates:
+                - Path=/api/orders/**
+              filters:
+                - StripPrefix=1
 
-# 라우팅 규칙은 README의 '라우팅 표'를 기준으로 채운다.
-# JWT는 Amazon Cognito가 RS256으로 서명한다. 공유 비밀 키 없이 Cognito 공개 키(JWKS)로 검증한다.
-# 검증 설정 예시 (README 'JWT 규칙'):
-#   spring.security.oauth2.resourceserver.jwt.issuer-uri: ${COGNITO_ISSUER_URI}
-#   앱 클라이언트 확인용: ${COGNITO_CLIENT_ID}
+# Cognito ID 토큰 검증 (README 'JWT 규칙'). 공개 키는 <issuer-uri>/.well-known/jwks.json에서 받아 캐시한다.
+# 파드는 NAT를 거쳐 Cognito에 닿는다. 공유 비밀 키는 없다.
+freshlink:
+  cognito:
+    issuer-uri: ${COGNITO_ISSUER_URI:}   # https://cognito-idp.ap-northeast-2.amazonaws.com/<UserPoolId>
+    client-id: ${COGNITO_CLIENT_ID:}     # 토큰 aud와 같아야 한다
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health, prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true             # /actuator/health/liveness, /readiness
+  # 추적(할 일 16). 요청마다 traceId를 만들어 로그에 넣고, 서비스로 넘길 때 traceparent 헤더를 붙인다.
+  # PC에는 Zipkin이 없어서 보내지 않는다. 클러스터에서는 gitops 차트(spring-service)가 환경 변수로 켜고 주소를 넣는다:
+  #   MANAGEMENT_TRACING_EXPORT_ZIPKIN_ENABLED=true, MANAGEMENT_TRACING_EXPORT_ZIPKIN_ENDPOINT=http://zipkin.observability:9411/api/v2/spans
+  # JSON 로그(LOGGING_STRUCTURED_FORMAT_CONSOLE=ecs)도 차트가 넣는다. PC 로그는 사람이 읽는 형식 그대로다.
+  tracing:
+    sampling:
+      probability: 1.0            # MVP는 요청이 적어 전부 기록
+    export:
+      zipkin:
+        enabled: false
