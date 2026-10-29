@@ -30,6 +30,9 @@ dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-actuator'                   // /actuator/health
     runtimeOnly 'io.micrometer:micrometer-registry-prometheus'                               // /actuator/prometheus
     implementation 'org.springframework.boot:spring-boot-starter-zipkin'                    // 추적: Micrometer Tracing(Brave) + Zipkin 전송 (할 일 16)
+    implementation platform('io.awspring.cloud:spring-cloud-aws-dependencies:4.2.0')       // AWS SDK 버전 관리 (서비스 3개와 같은 BOM)
+    implementation 'software.amazon.awssdk:cognitoidentityprovider'                        // BFF 로그인: AdminInitiateAuth, SignUp, ConfirmSignUp, RevokeToken
+    runtimeOnly 'software.amazon.awssdk:sts'                                                 // IRSA(웹 아이덴티티 토큰)로 AWS 자격을 받는 데 필요
 
     testImplementation 'org.springframework.boot:spring-boot-starter-webmvc-test'
     testImplementation 'org.springframework.boot:spring-boot-starter-actuator-test'

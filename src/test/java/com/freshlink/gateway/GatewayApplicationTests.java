@@ -209,9 +209,59 @@ class GatewayApplicationTests {
     @DisplayName("공개 경로라도 GET이 아니면 로그인이 필요하다")
     void publicPathNonGet_401() throws Exception {
         HttpResponse<String> res = http.send(HttpRequest.newBuilder(uri("/api/stores"))
-                .POST(HttpRequest.BodyPublishers.ofString("{}")).header("Content-Type", "application/json").build(),
+                .POST(HttpRequest.BodyPublishers.ofString("{}")).header("Content-Type", "application/json")
+                .header("X-Requested-With", "freshlink").build(),
                 HttpResponse.BodyHandlers.ofString());
         assertThat(res.statusCode()).isEqualTo(401);
+    }
+
+    // ------------------------------------------------------------------ BFF: 쿠키·CSRF·역할 거르기
+
+    @Test
+    @DisplayName("POST에 X-Requested-With: freshlink가 없으면 토큰이 맞아도 403")
+    void postWithoutCsrfHeader_403() throws Exception {
+        HttpResponse<String> res = http.send(HttpRequest.newBuilder(uri("/api/orders"))
+                .POST(HttpRequest.BodyPublishers.ofString("{}"))
+                .header("Content-Type", "application/json")
+                .header("Authorization", "Bearer " + customer()).build(), HttpResponse.BodyHandlers.ofString());
+        assertThat(res.statusCode()).isEqualTo(403);
+        assertThat(json.readTree(res.body()).get("code").asText()).isEqualTo("CSRF_HEADER_REQUIRED");
+
+        HttpResponse<String> wrong = http.send(HttpRequest.newBuilder(uri("/api/orders"))
+                .POST(HttpRequest.BodyPublishers.ofString("{}"))
+                .header("Content-Type", "application/json")
+                .header("X-Requested-With", "XMLHttpRequest")
+                .header("Authorization", "Bearer " + customer()).build(), HttpResponse.BodyHandlers.ofString());
+        assertThat(wrong.statusCode()).isEqualTo(403);
+    }
+
+    @Test
+    @DisplayName("Authorization 헤더가 없으면 fl_id 쿠키로 보호 경로를 통과한다")
+    void cookieToken_passesProtectedPath() throws Exception {
+        String sub = UUID.randomUUID().toString();
+        String token = token(KEY, c -> c.subject(sub).claim("cognito:groups", List.of("OWNER")).claim("custom:storeId", "3"));
+        JsonNode seen = seen(get("/api/owner/inventory", null, Map.of("Cookie", "fl_id=" + token)));
+        assertThat(seen.get("service").asText()).isEqualTo("inventory-service");
+        assertThat(header(seen, "X-User-Id")).containsExactly(sub);
+        assertThat(header(seen, "X-Store-Id")).containsExactly("3");
+    }
+
+    @Test
+    @DisplayName("fl_id 쿠키가 틀렸으면 401")
+    void badCookieToken_401() throws Exception {
+        String token = token(OTHER_KEY, c -> c.claim("cognito:groups", List.of("CUSTOMER")));
+        assertThat(get("/api/members/me", null, Map.of("Cookie", "fl_id=" + token)).statusCode()).isEqualTo(401);
+    }
+
+    @Test
+    @DisplayName("구글 사용자의 <UserPoolId>_Google 그룹은 X-User-Role에 넣지 않는다")
+    void googleGroup_filteredFromRole() throws Exception {
+        String token = token(KEY, c -> c.claim("cognito:groups", List.of("ap-northeast-2_TEST_Google", "CUSTOMER")));
+        JsonNode seen = seen(get("/api/members/me", token, Map.of()));
+        assertThat(header(seen, "X-User-Role")).containsExactly("CUSTOMER");
+
+        String onlyGoogle = token(KEY, c -> c.claim("cognito:groups", List.of("ap-northeast-2_TEST_Google")));
+        assertThat(header(seen(get("/api/members/me", onlyGoogle, Map.of())), "X-User-Role")).isEmpty();
     }
 
     @Test
@@ -222,6 +272,7 @@ class GatewayApplicationTests {
                 .POST(HttpRequest.BodyPublishers.ofString("{}"))
                 .header("Content-Type", "application/json")
                 .header("Authorization", "Bearer " + customer())
+                .header("X-Requested-With", "freshlink")
                 .header("Idempotency-Key", key).build(), HttpResponse.BodyHandlers.ofString());
         JsonNode seen = seen(res);
         assertThat(seen.get("service").asText()).isEqualTo("order-service");
