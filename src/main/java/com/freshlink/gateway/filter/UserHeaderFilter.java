@@ -26,6 +26,7 @@ import org.springframework.web.filter.OncePerRequestFilter;
  * <ol>
  *   <li>클라이언트가 보낸 X-User-Id·X-User-Role·X-Store-Id는 항상 지운다(위조 방지, 공개 경로 포함)</li>
  *   <li>검증된 토큰이 있으면 sub → X-User-Id, cognito:groups → X-User-Role(쉼표로 이음), custom:storeId → X-Store-Id</li>
+ *   <li>X-User-Role에는 OWNER·CUSTOMER·ADMIN만 넣는다. 구글 사용자에게 Cognito가 자동으로 붙이는 {@code <UserPoolId>_Google} 그룹은 뺀다</li>
  *   <li>custom:storeId가 없으면 X-Store-Id를 붙이지 않는다(서비스가 403 STORE_NOT_LINKED로 처리)</li>
  * </ol>
  */
@@ -34,6 +35,9 @@ public class UserHeaderFilter extends OncePerRequestFilter {
     public static final String USER_ID = "X-User-Id";
     public static final String USER_ROLE = "X-User-Role";
     public static final String STORE_ID = "X-Store-Id";
+
+    /** 서비스가 아는 역할. 그 밖의 그룹은 X-User-Role에 넣지 않는다 */
+    private static final Set<String> ROLES = Set.of("OWNER", "CUSTOMER", "ADMIN");
 
     private static final Set<String> TRUSTED = Set.of(
             USER_ID.toLowerCase(Locale.ROOT), USER_ROLE.toLowerCase(Locale.ROOT), STORE_ID.toLowerCase(Locale.ROOT));
@@ -47,8 +51,9 @@ public class UserHeaderFilter extends OncePerRequestFilter {
             Jwt jwt = token.getToken();
             added.put(USER_ID, jwt.getSubject());
             List<String> groups = jwt.getClaimAsStringList("cognito:groups");
-            if (groups != null && !groups.isEmpty()) {
-                added.put(USER_ROLE, String.join(",", groups));
+            List<String> roles = groups == null ? List.of() : groups.stream().filter(ROLES::contains).toList();
+            if (!roles.isEmpty()) {
+                added.put(USER_ROLE, String.join(",", roles));
             }
             String storeId = jwt.getClaimAsString("custom:storeId");
             if (StringUtils.hasText(storeId)) {

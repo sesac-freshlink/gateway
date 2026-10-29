@@ -62,11 +62,19 @@ spring:
                 - StripPrefix=1
 
 # Cognito ID 토큰 검증 (README 'JWT 규칙'). 공개 키는 <issuer-uri>/.well-known/jwks.json에서 받아 캐시한다.
-# 파드는 NAT를 거쳐 Cognito에 닿는다. 공유 비밀 키는 없다.
+# 파드는 NAT를 거쳐 Cognito에 닿는다. 토큰 검증에 공유 비밀 키는 쓰지 않는다.
+# BFF 로그인(README 'BFF 로그인')은 시크릿이 있는 bff 클라이언트로 gateway가 Cognito를 대신 부른다.
 freshlink:
   cognito:
-    issuer-uri: ${COGNITO_ISSUER_URI:}   # https://cognito-idp.ap-northeast-2.amazonaws.com/<UserPoolId>
-    client-id: ${COGNITO_CLIENT_ID:}     # 토큰 aud와 같아야 한다
+    issuer-uri: ${COGNITO_ISSUER_URI:}            # https://cognito-idp.ap-northeast-2.amazonaws.com/<UserPoolId>
+    client-id: ${COGNITO_CLIENT_ID:}              # 토큰 aud와 같아야 한다 (dev는 bff, prod는 릴리스 때 bff)
+    bff-client-id: ${COGNITO_BFF_CLIENT_ID:}      # 로그인·갱신·가입에 쓰는 bff 클라이언트
+    client-secret: ${COGNITO_CLIENT_SECRET:}      # bff 클라이언트 시크릿. 파일·로그에 쓰지 않는다
+    user-pool-id: ${COGNITO_USER_POOL_ID:}
+    domain-url: ${COGNITO_DOMAIN_URL:}            # 구글 로그인: https://freshlink-<env>-auth.auth.ap-northeast-2.amazoncognito.com
+    region: ${AWS_REGION:ap-northeast-2}
+    refresh-token-validity: 1d                    # fl_refresh·fl_uid 쿠키 만료. infra modules/cognito refresh_token_validity_days와 같게
+  frontend-url: ${FRONTEND_URL:}                  # 구글 콜백 redirect_uri와 로그인 뒤 돌아갈 곳 (https://<id>.cloudfront.net)
 
 management:
   endpoints:
