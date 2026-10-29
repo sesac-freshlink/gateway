@@ -51,6 +51,7 @@ public class SecurityConfig {
                         .requestMatchers(actuator).permitAll()
                         .requestMatchers(HttpMethod.GET,
                                 "/api/stores/{storeId}/products",
+                                "/api/stores/{storeId}/products/{productId}",
                                 "/api/stores",
                                 "/api/members/nickname-availability").permitAll()
                         .requestMatchers("/api/admin/**").hasRole("ADMIN")

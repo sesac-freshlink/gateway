@@ -42,7 +42,7 @@ flowchart LR
 
    | 순서 | 경로 | 메서드 | 보내는 곳 | 인증 | 역할 (아니면 403) |
    | --- | --- | --- | --- | --- | --- |
-   | 1 | `/api/stores/{storeId}/products` | GET | inventory-service | 공개 | |
+   | 1 | `/api/stores/{storeId}/products`, `/api/stores/{storeId}/products/{productId}` | GET | inventory-service | 공개 | |
    | 2 | `/api/stores` | GET | member-service | 공개 | |
    | 3 | `/api/members/nickname-availability` | GET | member-service | 공개 | |
    | 4 | `/api/members/**` | 전부 | member-service | 로그인 | |
