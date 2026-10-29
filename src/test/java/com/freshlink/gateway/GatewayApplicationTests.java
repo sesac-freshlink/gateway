@@ -198,6 +198,8 @@ class GatewayApplicationTests {
         assertThat(header(seen, "X-User-Id")).isEmpty();
         assertThat(header(seen, "X-User-Role")).isEmpty();
 
+        assertThat(seen(get("/api/stores/1/products/5", null, Map.of())).get("path").asText())
+                .isEqualTo("/stores/1/products/5");
         assertThat(seen(get("/api/stores?region=SEOUL", null, Map.of())).get("service").asText()).isEqualTo("member-service");
         assertThat(seen(get("/api/members/nickname-availability?nickname=Fresh01", null, Map.of())).get("path").asText())
                 .isEqualTo("/members/nickname-availability");
