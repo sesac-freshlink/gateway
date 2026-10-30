@@ -127,6 +127,22 @@ public class AuthController {
         return ResponseEntity.noContent().headers(AuthCookies.clearSession()).build();
     }
 
+    /**
+     * 로그아웃 뒤 Cognito 로그인 도메인의 로그인 기록까지 지운다 → Cognito /logout으로 302.
+     * 이 기록이 남아 있으면 다음 구글 로그인이 계정 선택 없이 직전 계정으로 바로 된다 (BFF 인수인계 6장 7).
+     * 화면은 POST /logout으로 쿠키를 지운 뒤 이 주소로 이동한다. Cognito는 {FRONTEND_URL}/login으로 돌려보낸다
+     */
+    @GetMapping("/logout/sso")
+    public ResponseEntity<Void> ssoLogout() {
+        URI logout = UriComponentsBuilder.fromUriString(props.domainUrl().replaceAll("/+$", "") + "/logout")
+                .queryParam("client_id", props.bffClientId())
+                .queryParam("logout_uri", frontendUrl + "/login")
+                .encode(StandardCharsets.UTF_8)
+                .build()
+                .toUri();
+        return ResponseEntity.status(HttpStatus.FOUND).location(logout).build();
+    }
+
     /** 새로 고침 뒤 로그인 복원. fl_id가 없거나 만료면 보안 설정이 먼저 401을 준다 */
     @GetMapping("/me")
     public ResponseEntity<?> me(@AuthenticationPrincipal Jwt jwt) {
