@@ -34,7 +34,7 @@ flowchart LR
 
 > 비유: Cognito가 놀이공원 매표소(신분 확인 후 손목띠 채우기)라면, gateway는 놀이기구 입구 직원(손목띠가 진짜인지, 오늘 날짜인지만 확인)이다.
 
-> **변경 (2026-10-13):** 처음에는 member-service가 HS256 JWT를 발급하고 gateway가 같은 비밀 키로 검증하기로 했으나, 발급을 Amazon Cognito로 옮겼다. Keycloak과의 비교와 이유는 [infra/docs/기술스택과 선택이유.md](https://github.com/sesac-freshlink/infra/blob/main/docs/기술스택과%20선택이유.md) 3-7.
+> **변경 (2026-10-13):** 처음에는 member-service가 HS256 JWT를 발급하고 gateway가 같은 비밀 키로 검증하기로 했으나, 발급을 Amazon Cognito로 옮겼다. Keycloak과의 비교와 이유는 [.github docs/기획/기술스택과-선택이유.md](https://github.com/sesac-freshlink/.github/blob/main/docs/기획/기술스택과-선택이유.md) 3-7.
 
 ## 3. 하는 일
 
@@ -71,7 +71,7 @@ flowchart LR
 
 ### 로그인(BFF) (2026-10-29)
 
-브라우저는 Cognito에 직접 가지 않고 gateway의 `/api/auth/*`를 부른다. gateway가 시크릿이 있는 `bff` 앱 클라이언트로 Cognito에 대신 요청하고, 받은 토큰을 브라우저 자바스크립트가 읽을 수 없는 쿠키(HttpOnly)에 넣는다. 설계와 이유는 [.github docs/BFF-인수인계.md](https://github.com/sesac-freshlink/.github/blob/main/docs/BFF-인수인계.md)가 기준이다.
+브라우저는 Cognito에 직접 가지 않고 gateway의 `/api/auth/*`를 부른다. gateway가 시크릿이 있는 `bff` 앱 클라이언트로 Cognito에 대신 요청하고, 받은 토큰을 브라우저 자바스크립트가 읽을 수 없는 쿠키(HttpOnly)에 넣는다. 설계와 이유는 [.github docs/인수인계/BFF.md](https://github.com/sesac-freshlink/.github/blob/main/docs/인수인계/BFF.md)가 기준이다.
 
 | 경로 | 메서드 | 인증 | 하는 일 | 응답 |
 | --- | --- | --- | --- | --- |
@@ -155,7 +155,7 @@ Spring Cloud Gateway는 WebFlux(리액티브)판과 WebMVC(서블릿)판 두 가
 
 > 라우팅·토큰 검증이 들어 있다. DB는 없지만 `COGNITO_ISSUER_URI`·`COGNITO_CLIENT_ID`가 없으면 뜨지 않는다. 로그인 API까지 쓰려면 위 BFF 환경 변수도 넣는다. 뒤 서비스는 dev 클러스터에 있으므로 PC에서 띄우면 라우팅 대상(`http://member-service:8080` 등)에 닿지 않는다. 확인은 dev 클러스터에서 한다.
 
-개발할 때도 AWS dev 환경의 RDS·SQS·Cognito를 그대로 쓴다. AWS 로그인, DB 포트 포워딩(SSM), 개인 큐 설정은 [개발 환경 접속 가이드](https://github.com/sesac-freshlink/.github/blob/main/docs/개발환경-접속.md)를 따른다.
+개발할 때도 AWS dev 환경의 RDS·SQS·Cognito를 그대로 쓴다. AWS 로그인, DB 포트 포워딩(SSM), 개인 큐 설정은 [개발 환경 접속 가이드](https://github.com/sesac-freshlink/.github/blob/main/docs/팀원-가이드/0-개발환경-접속.md)를 따른다.
 
 ```bash
 export SPRING_PROFILES_ACTIVE=dev
