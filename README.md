@@ -48,9 +48,11 @@ flowchart LR
    | 4 | `/api/members/**` | 전부 | member-service | 로그인 | |
    | 5 | `/api/admin/**` | 전부 | member-service | 로그인 | ADMIN |
    | 6 | `/api/owner/inventory/**`, `/api/owner/disposals` | 전부 | inventory-service | 로그인 | OWNER |
-   | 7 | `/api/owner/orders` | 전부 | order-service | 로그인 | OWNER |
+   | 7 | `/api/owner/orders/**` | 전부 | order-service | 로그인 | OWNER |
    | 8 | `/api/orders/**` | 전부 | order-service | 로그인 | CUSTOMER |
    | - | `/ops/**`, 그 밖의 경로 | - | 라우트 없음 | 막음 | |
+
+   `/api/owner/orders/**`에는 목록·픽업 확인(`POST /api/owner/orders/{orderId}/pickup`)·매출(`/sales`)·매출 SSE(`/sales/stream`)가 들어간다. SSE(`text/event-stream`)는 gateway가 모으지 않고 받는 대로 넘기고, 서비스로 가는 읽기 타임아웃도 없다(따로 설정할 것 없음, `application.yml` 주석). 서비스는 20초마다 heartbeat를 보낸다(CloudFront 30초·ALB 60초에 끊기지 않게).
 
    서비스 주소는 기본값이 쿠버네티스 Service 이름(`http://member-service:8080` 등)이고, `MEMBER_SERVICE_URI`·`INVENTORY_SERVICE_URI`·`ORDER_SERVICE_URI`로 바꿀 수 있다. `Idempotency-Key`·`Authorization` 같은 다른 헤더는 그대로 넘긴다.
 
