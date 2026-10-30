@@ -57,7 +57,7 @@ public class SecurityConfig {
                                 "/api/auth/confirm",
                                 "/api/auth/refresh",
                                 "/api/auth/logout").permitAll()
-                        .requestMatchers(HttpMethod.GET, "/api/auth/google", "/api/auth/callback").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/auth/google", "/api/auth/callback", "/api/auth/logout/sso").permitAll()
                         .requestMatchers(HttpMethod.GET,
                                 "/api/stores/{storeId}/products",
                                 "/api/stores/{storeId}/products/{productId}",

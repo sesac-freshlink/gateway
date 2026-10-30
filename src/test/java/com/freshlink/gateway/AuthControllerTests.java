@@ -352,6 +352,19 @@ class AuthControllerTests {
     }
 
     @Test
+    @DisplayName("로그아웃 뒤 Cognito 기록 지우기: 로그인 없이 Cognito /logout으로 302, 돌아올 곳은 화면 /login")
+    void ssoLogout_redirectsToCognitoLogout() throws Exception {
+        HttpResponse<String> res = get("/api/auth/logout/sso", null);
+        assertThat(res.statusCode()).isEqualTo(302);
+        URI location = URI.create(res.headers().firstValue("Location").orElseThrow());
+        assertThat(location.getPath()).isEqualTo("/logout");
+        assertThat(query(location.getRawQuery())).containsOnly(
+                Map.entry("client_id", BFF_CLIENT_ID),
+                Map.entry("logout_uri", FRONTEND + "/login"));
+        assertThat(setCookies(res)).isEmpty();
+    }
+
+    @Test
     @DisplayName("구글 콜백: 코드를 토큰으로 바꾸고 쿠키 3개 + fl_oauth 삭제, 화면 첫 주소로 302")
     void callback_success() throws Exception {
         String username = "google_1234567890";
