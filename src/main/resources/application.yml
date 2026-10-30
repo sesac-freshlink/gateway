@@ -32,7 +32,7 @@ spring:
             - id: member-stores                     # 2. 공개
               uri: ${MEMBER_SERVICE_URI:http://member-service:8080}
               predicates:
-                - Path=/api/stores
+                - Path=/api/stores,/api/stores/{storeId}   # 점포 검색·점포 상세
                 - Method=GET
               filters:
                 - StripPrefix=1

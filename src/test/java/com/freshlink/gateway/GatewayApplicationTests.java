@@ -220,6 +220,9 @@ class GatewayApplicationTests {
         assertThat(seen(get("/api/stores/1/products/5", null, Map.of())).get("path").asText())
                 .isEqualTo("/stores/1/products/5");
         assertThat(seen(get("/api/stores?region=SEOUL", null, Map.of())).get("service").asText()).isEqualTo("member-service");
+        JsonNode store = seen(get("/api/stores/3", null, Map.of()));
+        assertThat(store.get("service").asText()).isEqualTo("member-service");
+        assertThat(store.get("path").asText()).isEqualTo("/stores/3");
         assertThat(seen(get("/api/members/nickname-availability?nickname=Fresh01", null, Map.of())).get("path").asText())
                 .isEqualTo("/members/nickname-availability");
     }
