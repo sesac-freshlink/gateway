@@ -43,18 +43,20 @@ flowchart LR
    | 순서 | 경로 | 메서드 | 보내는 곳 | 인증 | 역할 (아니면 403) |
    | --- | --- | --- | --- | --- | --- |
    | 1 | `/api/stores/{storeId}/products`, `/api/stores/{storeId}/products/{productId}` | GET | inventory-service | 공개 | |
-   | 2 | `/api/stores` | GET | member-service | 공개 | |
+   | 2 | `/api/stores`, `/api/stores/{storeId}` | GET | member-service | 공개 | |
    | 3 | `/api/members/nickname-availability` | GET | member-service | 공개 | |
    | 4 | `/api/members/**` | 전부 | member-service | 로그인 | |
    | 5 | `/api/admin/**` | 전부 | member-service | 로그인 | ADMIN |
    | 6 | `/api/owner/inventory/**`, `/api/owner/disposals` | 전부 | inventory-service | 로그인 | OWNER |
-   | 7 | `/api/owner/orders` | 전부 | order-service | 로그인 | OWNER |
+   | 7 | `/api/owner/orders/**` | 전부 | order-service | 로그인 | OWNER |
    | 8 | `/api/orders/**` | 전부 | order-service | 로그인 | CUSTOMER |
    | - | `/ops/**`, 그 밖의 경로 | - | 라우트 없음 | 막음 | |
 
+   `/api/owner/orders/**`에는 목록·픽업 확인(`POST /api/owner/orders/{orderId}/pickup`)·매출(`/sales`)·매출 SSE(`/sales/stream`)가 들어간다. SSE(`text/event-stream`)는 gateway가 모으지 않고 받는 대로 넘기고, 서비스로 가는 읽기 타임아웃도 없다(따로 설정할 것 없음, `application.yml` 주석). 서비스는 20초마다 heartbeat를 보낸다(CloudFront 30초·ALB 60초에 끊기지 않게).
+
    서비스 주소는 기본값이 쿠버네티스 Service 이름(`http://member-service:8080` 등)이고, `MEMBER_SERVICE_URI`·`INVENTORY_SERVICE_URI`·`ORDER_SERVICE_URI`로 바꿀 수 있다. `Idempotency-Key`·`Authorization` 같은 다른 헤더는 그대로 넘긴다.
 
-2. **공개 경로 예외:** 위 표의 GET 3개와 아래 "로그인(BFF)" 표에서 공개로 적은 `/api/auth/*`만 토큰 없이 통과시킨다. 같은 경로라도 GET이 아니면 로그인이 필요하다.
+2. **공개 경로 예외:** 위 표의 GET 경로(1·2·3번)와 아래 "로그인(BFF)" 표에서 공개로 적은 `/api/auth/*`만 토큰 없이 통과시킨다. 같은 경로라도 GET이 아니면 로그인이 필요하다.
 3. **토큰 찾기:** `Authorization: Bearer` 헤더가 있으면 그것을, 없으면 `fl_id` 쿠키를 쓴다. 로그인·갱신 같은 `/api/auth/*` 요청에는 쿠키를 보지 않는다(`/api/auth/me`만 본다). 만료된 쿠키 때문에 로그인 요청이 401로 막히지 않게 하려는 것이다.
 4. **CSRF 확인:** `/api/**`로 오는 POST·PUT·PATCH·DELETE는 `X-Requested-With: freshlink` 헤더가 있어야 한다. 없으면 `403` `{"code":"CSRF_HEADER_REQUIRED",...}`. 쿠키는 다른 사이트에서도 따라오지만 이 헤더는 다른 사이트가 붙일 수 없다(브라우저가 사전 요청으로 막는다).
 5. **토큰 검증:** Cognito 공개 키(JWKS)로 RS256 서명, 만료(`exp`), 발급자(`iss`), `token_use = id`, `aud`(= 앱 클라이언트 ID)를 확인한다. 하나라도 틀리면 `401`.

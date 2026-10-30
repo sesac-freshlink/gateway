@@ -15,6 +15,12 @@ spring:
           # 라우팅 표 (API 명세 'Gateway 라우팅' 시트, README 3장). 위에서부터 먼저 매칭한다.
           # 모든 라우트가 /api를 떼고 넘긴다(StripPrefix=1). /ops/**, /actuator/** 라우트는 만들지 않는다.
           # Idempotency-Key, Authorization 같은 다른 헤더는 그대로 넘긴다. 사용자 헤더는 UserHeaderFilter가 만든다.
+          # SSE(점주 매출 /api/owner/orders/sales/stream, 2차 알림 /api/notifications/stream)는 따로 설정하지 않아도 된다.
+          #  - 버퍼링: 응답이 text/event-stream이면 Gateway MVC가 받는 대로 바로 흘려보낸다(streaming-media-types 기본값).
+          #  - 타임아웃: 서비스로 가는 HTTP 클라이언트에 읽기 타임아웃이 없다(spring.http.clients.read-timeout 미설정).
+          #    이 값을 넣으면 SSE에도 걸리므로, 넣는다면 heartbeat(20초)보다 길게 둔다.
+          #  끊김 기준은 CloudFront origin 응답 타임아웃 30초와 ALB 유휴 타임아웃 60초라 서비스가 20초마다 heartbeat를 보낸다.
+          #  확인 테스트: GatewayApplicationTests.ownerSalesStream_notBuffered
           routes:
             - id: inventory-store-products          # 1. 공개. /api/stores보다 먼저
               uri: ${INVENTORY_SERVICE_URI:http://inventory-service:8080}
@@ -26,7 +32,7 @@ spring:
             - id: member-stores                     # 2. 공개
               uri: ${MEMBER_SERVICE_URI:http://member-service:8080}
               predicates:
-                - Path=/api/stores
+                - Path=/api/stores,/api/stores/{storeId}   # 점포 검색·점포 상세
                 - Method=GET
               filters:
                 - StripPrefix=1
@@ -51,7 +57,7 @@ spring:
             - id: order-owner                       # 8. OWNER
               uri: ${ORDER_SERVICE_URI:http://order-service:8080}
               predicates:
-                - Path=/api/owner/orders
+                - Path=/api/owner/orders/**         # 목록·픽업 확인·매출 (/api/owner/orders 자체도 포함)
               filters:
                 - StripPrefix=1
             - id: order-orders                      # 9. CUSTOMER

@@ -13,7 +13,10 @@ import com.nimbusds.jose.jwk.gen.RSAKeyGenerator;
 import com.nimbusds.jwt.JWTClaimsSet;
 import com.nimbusds.jwt.SignedJWT;
 import com.sun.net.httpserver.HttpServer;
+import java.io.BufferedReader;
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.net.URI;
@@ -57,6 +60,22 @@ class GatewayApplicationTests {
     static final HttpServer MEMBER = start("member-service", null);
     static final HttpServer INVENTORY = start("inventory-service", null);
     static final HttpServer ORDER = start("order-service", null);
+
+    static {
+        // 점주 매출 SSE: 이벤트 하나를 보내고 2초 쉰 뒤 하나 더 보낸다 (gateway가 모았다가 한꺼번에 보내는지 확인용)
+        ORDER.createContext("/owner/orders/sales/stream", exchange -> {
+            exchange.getResponseHeaders().add("Content-Type", "text/event-stream");
+            exchange.sendResponseHeaders(200, 0);
+            try (OutputStream out = exchange.getResponseBody()) {
+                out.write("data: first\n\n".getBytes(StandardCharsets.UTF_8));
+                out.flush();
+                Thread.sleep(2000);
+                out.write("data: second\n\n".getBytes(StandardCharsets.UTF_8));
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        });
+    }
 
     static final String ISSUER = "http://localhost:" + COGNITO.getAddress().getPort() + "/ap-northeast-2_TEST";
 
@@ -201,6 +220,9 @@ class GatewayApplicationTests {
         assertThat(seen(get("/api/stores/1/products/5", null, Map.of())).get("path").asText())
                 .isEqualTo("/stores/1/products/5");
         assertThat(seen(get("/api/stores?region=SEOUL", null, Map.of())).get("service").asText()).isEqualTo("member-service");
+        JsonNode store = seen(get("/api/stores/3", null, Map.of()));
+        assertThat(store.get("service").asText()).isEqualTo("member-service");
+        assertThat(store.get("path").asText()).isEqualTo("/stores/3");
         assertThat(seen(get("/api/members/nickname-availability?nickname=Fresh01", null, Map.of())).get("path").asText())
                 .isEqualTo("/members/nickname-availability");
     }
@@ -285,9 +307,52 @@ class GatewayApplicationTests {
     void ownerOrdersAndAdminRoutes() throws Exception {
         assertThat(seen(get("/api/owner/orders", owner("2"), Map.of())).get("service").asText()).isEqualTo("order-service");
         assertThat(seen(get("/api/owner/disposals", owner("2"), Map.of())).get("service").asText()).isEqualTo("inventory-service");
+        JsonNode sales = seen(get("/api/owner/orders/sales?from=2026-10-30", owner("2"), Map.of()));
+        assertThat(sales.get("service").asText()).isEqualTo("order-service");
+        assertThat(sales.get("path").asText()).isEqualTo("/owner/orders/sales");
         JsonNode admin = seen(get("/api/admin/stores?page=0", groupToken("ADMIN", null), Map.of()));
         assertThat(admin.get("service").asText()).isEqualTo("member-service");
         assertThat(admin.get("path").asText()).isEqualTo("/admin/stores");
+    }
+
+    @Test
+    @DisplayName("점주 픽업 확인 POST는 order로 가고, 점주가 아니면 403")
+    void ownerPickup_routedToOrder() throws Exception {
+        HttpResponse<String> res = http.send(HttpRequest.newBuilder(uri("/api/owner/orders/7/pickup"))
+                .POST(HttpRequest.BodyPublishers.ofString("{}"))
+                .header("Content-Type", "application/json")
+                .header("Authorization", "Bearer " + owner("2"))
+                .header("X-Requested-With", "freshlink").build(), HttpResponse.BodyHandlers.ofString());
+        JsonNode seen = seen(res);
+        assertThat(seen.get("service").asText()).isEqualTo("order-service");
+        assertThat(seen.get("method").asText()).isEqualTo("POST");
+        assertThat(seen.get("path").asText()).isEqualTo("/owner/orders/7/pickup");
+        assertThat(header(seen, "X-Store-Id")).containsExactly("2");
+
+        HttpResponse<String> customer = http.send(HttpRequest.newBuilder(uri("/api/owner/orders/7/pickup"))
+                .POST(HttpRequest.BodyPublishers.ofString("{}"))
+                .header("Content-Type", "application/json")
+                .header("Authorization", "Bearer " + customer())
+                .header("X-Requested-With", "freshlink").build(), HttpResponse.BodyHandlers.ofString());
+        assertThat(customer.statusCode()).isEqualTo(403);
+        assertThat(get("/api/owner/orders/sales", customer(), Map.of()).statusCode()).isEqualTo(403);
+    }
+
+    @Test
+    @DisplayName("매출 SSE는 이벤트가 오는 대로 넘긴다 (모았다가 보내지 않는다)")
+    void ownerSalesStream_notBuffered() throws Exception {
+        long start = System.nanoTime();
+        HttpResponse<InputStream> res = http.send(HttpRequest.newBuilder(uri("/api/owner/orders/sales/stream"))
+                .header("Authorization", "Bearer " + owner("2"))
+                .header("Accept", "text/event-stream").GET().build(), HttpResponse.BodyHandlers.ofInputStream());
+        assertThat(res.statusCode()).isEqualTo(200);
+        assertThat(res.headers().firstValue("Content-Type")).hasValueSatisfying(v -> assertThat(v).startsWith("text/event-stream"));
+        try (BufferedReader body = new BufferedReader(new InputStreamReader(res.body(), StandardCharsets.UTF_8))) {
+            assertThat(body.readLine()).isEqualTo("data: first");
+            assertThat((System.nanoTime() - start) / 1_000_000).as("첫 이벤트까지 걸린 ms").isLessThan(1500);
+            body.readLine();
+            assertThat(body.readLine()).isEqualTo("data: second");
+        }
     }
 
     // ------------------------------------------------------------------ 추적 (할 일 16)
