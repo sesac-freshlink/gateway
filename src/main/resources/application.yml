@@ -20,7 +20,7 @@ spring:
           #  - 타임아웃: 서비스로 가는 HTTP 클라이언트에 읽기 타임아웃이 없다(spring.http.clients.read-timeout 미설정).
           #    이 값을 넣으면 SSE에도 걸리므로, 넣는다면 heartbeat(20초)보다 길게 둔다.
           #  끊김 기준은 CloudFront origin 응답 타임아웃 30초와 ALB 유휴 타임아웃 60초라 서비스가 20초마다 heartbeat를 보낸다.
-          #  확인 테스트: GatewayApplicationTests.ownerSalesStream_notBuffered
+          #  확인 테스트: GatewayApplicationTests.ownerSalesStream_notBuffered, notificationStream_notBuffered
           routes:
             - id: inventory-store-products          # 1. 공개. /api/stores보다 먼저
               uri: ${INVENTORY_SERVICE_URI:http://inventory-service:8080}
@@ -64,6 +64,12 @@ spring:
               uri: ${ORDER_SERVICE_URI:http://order-service:8080}
               predicates:
                 - Path=/api/orders/**
+              filters:
+                - StripPrefix=1
+            - id: notification                      # 10. 로그인 (알림 목록·읽음·SSE·재입고 알림 신청)
+              uri: ${NOTIFICATION_SERVICE_URI:http://notification-service:8080}
+              predicates:
+                - Path=/api/notifications/**
               filters:
                 - StripPrefix=1
 
