@@ -30,6 +30,8 @@ import java.util.Date;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executors;
 import java.util.UUID;
 import java.util.function.Consumer;
 import org.junit.jupiter.api.AfterAll;
@@ -86,6 +88,21 @@ class GatewayApplicationTests {
                 Thread.sleep(2000);
                 out.write("id:2\nevent:notification\ndata:second\n\n".getBytes(StandardCharsets.UTF_8));
             } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        });
+    }
+
+    static {
+        // 오래 열려 있는 알림 SSE: 이벤트 하나를 보내고 10초 붙잡는다 (연결 풀이 SSE로 다 차는지 확인용)
+        NOTIFICATION.createContext("/notifications/stream-hold", exchange -> {
+            exchange.getResponseHeaders().add("Content-Type", "text/event-stream");
+            exchange.sendResponseHeaders(200, 0);
+            try (OutputStream out = exchange.getResponseBody()) {
+                out.write(":connected\n\n".getBytes(StandardCharsets.UTF_8));
+                out.flush();
+                Thread.sleep(10_000);
+            } catch (InterruptedException | IOException e) {
                 Thread.currentThread().interrupt();
             }
         });
@@ -387,6 +404,38 @@ class GatewayApplicationTests {
     }
 
     @Test
+    @DisplayName("알림 SSE가 8개 열려 있어도 같은 서비스로 가는 다른 요청은 바로 간다 (연결 풀 서비스당 5개 기본값이면 3분 기다리다 504)")
+    void manyOpenStreams_doNotBlockOtherRequests() throws Exception {
+        List<CompletableFuture<HttpResponse<InputStream>>> streams = new java.util.ArrayList<>();
+        for (int i = 0; i < 8; i++) {
+            streams.add(http.sendAsync(HttpRequest.newBuilder(uri("/api/notifications/stream-hold"))
+                    .header("Authorization", "Bearer " + customer())
+                    .header("Accept", "text/event-stream").GET().build(), HttpResponse.BodyHandlers.ofInputStream()));
+        }
+        try {
+            for (CompletableFuture<HttpResponse<InputStream>> stream : streams) {
+                HttpResponse<InputStream> res = stream.get(5, java.util.concurrent.TimeUnit.SECONDS);
+                assertThat(res.statusCode()).isEqualTo(200);
+                assertThat(new BufferedReader(new InputStreamReader(res.body(), StandardCharsets.UTF_8)).readLine())
+                        .isEqualTo(":connected");
+            }
+            HttpResponse<String> count = http.send(HttpRequest.newBuilder(uri("/api/notifications/unread-count"))
+                    .header("Authorization", "Bearer " + customer())
+                    .timeout(java.time.Duration.ofSeconds(3)).GET().build(), HttpResponse.BodyHandlers.ofString());
+            assertThat(count.statusCode()).isEqualTo(200);
+            assertThat(json.readTree(count.body()).get("path").asText()).isEqualTo("/notifications/unread-count");
+        } finally {
+            streams.forEach(s -> s.thenAccept(res -> {
+                try {
+                    res.body().close();
+                } catch (IOException ignored) {
+                    // 테스트 정리
+                }
+            }));
+        }
+    }
+
+    @Test
     @DisplayName("재입고 알림 신청 POST는 CSRF 헤더가 있으면 notification으로 간다")
     void restockSubscribe_routedWithCsrf() throws Exception {
         HttpResponse<String> res = http.send(HttpRequest.newBuilder(uri("/api/notifications/restock/15?storeId=1"))
@@ -543,6 +592,7 @@ class GatewayApplicationTests {
                 body.put("headers", exchange.getRequestHeaders());
                 reply(exchange, 200, new ObjectMapper().writeValueAsString(body));
             });
+            server.setExecutor(Executors.newCachedThreadPool()); // SSE를 여러 개 붙잡아도 다른 요청을 받게
             server.start();
             return server;
         } catch (IOException e) {

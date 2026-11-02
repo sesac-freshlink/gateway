@@ -53,7 +53,7 @@ flowchart LR
    | 9 | `/api/notifications/**` | 전부 | notification-service | 로그인 | (서비스가 고객·점주를 나눈다) |
    | - | `/ops/**`, 그 밖의 경로 | - | 라우트 없음 | 막음 | |
 
-   `/api/owner/orders/**`에는 목록·픽업 확인(`POST /api/owner/orders/{orderId}/pickup`)·매출(`/sales`)·매출 SSE(`/sales/stream`)가 들어간다. SSE(`text/event-stream`)는 gateway가 모으지 않고 받는 대로 넘기고, 서비스로 가는 읽기 타임아웃도 없다(따로 설정할 것 없음, `application.yml` 주석). 화면 알림 SSE(`/api/notifications/stream`)도 같다. 서비스는 20초마다 heartbeat를 보낸다(CloudFront origin 응답 타임아웃 30초·ALB 유휴 타임아웃 60초에 끊기지 않게).
+   `/api/owner/orders/**`에는 목록·픽업 확인(`POST /api/owner/orders/{orderId}/pickup`)·매출(`/sales`)·매출 SSE(`/sales/stream`)가 들어간다. SSE(`text/event-stream`)는 gateway가 모으지 않고 받는 대로 넘기고, 서비스로 가는 읽기 타임아웃도 없다(`application.yml` 주석). SSE는 서비스로 가는 연결을 계속 잡고 있으므로, 연결 풀을 서비스당 200개(대기 5초)로 늘려 둔다(`ProxyHttpClientConfig`). 기본값 5개일 때는 SSE 5개가 열리면 같은 서비스의 다른 요청이 504가 됐다(11/2 dev 알림). 화면 알림 SSE(`/api/notifications/stream`)도 같다. 서비스는 20초마다 heartbeat를 보낸다(CloudFront origin 응답 타임아웃 30초·ALB 유휴 타임아웃 60초에 끊기지 않게).
 
    서비스 주소는 기본값이 쿠버네티스 Service 이름(`http://member-service:8080` 등)이고, `MEMBER_SERVICE_URI`·`INVENTORY_SERVICE_URI`·`ORDER_SERVICE_URI`·`NOTIFICATION_SERVICE_URI`로 바꿀 수 있다. `Idempotency-Key`·`Authorization` 같은 다른 헤더는 그대로 넘긴다.
 
