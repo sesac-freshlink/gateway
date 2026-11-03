@@ -13,7 +13,10 @@ import com.nimbusds.jose.jwk.gen.RSAKeyGenerator;
 import com.nimbusds.jwt.JWTClaimsSet;
 import com.nimbusds.jwt.SignedJWT;
 import com.sun.net.httpserver.HttpServer;
+import java.io.BufferedReader;
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.net.URI;
@@ -27,6 +30,8 @@ import java.util.Date;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executors;
 import java.util.UUID;
 import java.util.function.Consumer;
 import org.junit.jupiter.api.AfterAll;
@@ -57,6 +62,51 @@ class GatewayApplicationTests {
     static final HttpServer MEMBER = start("member-service", null);
     static final HttpServer INVENTORY = start("inventory-service", null);
     static final HttpServer ORDER = start("order-service", null);
+    static final HttpServer NOTIFICATION = start("notification-service", null);
+
+    static {
+        // 점주 매출 SSE: 이벤트 하나를 보내고 2초 쉰 뒤 하나 더 보낸다 (gateway가 모았다가 한꺼번에 보내는지 확인용)
+        ORDER.createContext("/owner/orders/sales/stream", exchange -> {
+            exchange.getResponseHeaders().add("Content-Type", "text/event-stream");
+            exchange.sendResponseHeaders(200, 0);
+            try (OutputStream out = exchange.getResponseBody()) {
+                out.write("data: first\n\n".getBytes(StandardCharsets.UTF_8));
+                out.flush();
+                Thread.sleep(2000);
+                out.write("data: second\n\n".getBytes(StandardCharsets.UTF_8));
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        });
+        // 알림 SSE: 연결 주석 뒤 이벤트 하나, 2초 쉬고 하나 더 (모았다가 보내지 않는지)
+        NOTIFICATION.createContext("/notifications/stream", exchange -> {
+            exchange.getResponseHeaders().add("Content-Type", "text/event-stream");
+            exchange.sendResponseHeaders(200, 0);
+            try (OutputStream out = exchange.getResponseBody()) {
+                out.write(":connected\n\nid:1\nevent:notification\ndata:first\n\n".getBytes(StandardCharsets.UTF_8));
+                out.flush();
+                Thread.sleep(2000);
+                out.write("id:2\nevent:notification\ndata:second\n\n".getBytes(StandardCharsets.UTF_8));
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        });
+    }
+
+    static {
+        // 오래 열려 있는 알림 SSE: 이벤트 하나를 보내고 10초 붙잡는다 (연결 풀이 SSE로 다 차는지 확인용)
+        NOTIFICATION.createContext("/notifications/stream-hold", exchange -> {
+            exchange.getResponseHeaders().add("Content-Type", "text/event-stream");
+            exchange.sendResponseHeaders(200, 0);
+            try (OutputStream out = exchange.getResponseBody()) {
+                out.write(":connected\n\n".getBytes(StandardCharsets.UTF_8));
+                out.flush();
+                Thread.sleep(10_000);
+            } catch (InterruptedException | IOException e) {
+                Thread.currentThread().interrupt();
+            }
+        });
+    }
 
     static final String ISSUER = "http://localhost:" + COGNITO.getAddress().getPort() + "/ap-northeast-2_TEST";
 
@@ -67,11 +117,12 @@ class GatewayApplicationTests {
         registry.add("MEMBER_SERVICE_URI", () -> "http://localhost:" + MEMBER.getAddress().getPort());
         registry.add("INVENTORY_SERVICE_URI", () -> "http://localhost:" + INVENTORY.getAddress().getPort());
         registry.add("ORDER_SERVICE_URI", () -> "http://localhost:" + ORDER.getAddress().getPort());
+        registry.add("NOTIFICATION_SERVICE_URI", () -> "http://localhost:" + NOTIFICATION.getAddress().getPort());
     }
 
     @AfterAll
     static void stop() {
-        List.of(COGNITO, MEMBER, INVENTORY, ORDER).forEach(s -> s.stop(0));
+        List.of(COGNITO, MEMBER, INVENTORY, ORDER, NOTIFICATION).forEach(s -> s.stop(0));
     }
 
     @LocalServerPort
@@ -198,7 +249,12 @@ class GatewayApplicationTests {
         assertThat(header(seen, "X-User-Id")).isEmpty();
         assertThat(header(seen, "X-User-Role")).isEmpty();
 
+        assertThat(seen(get("/api/stores/1/products/5", null, Map.of())).get("path").asText())
+                .isEqualTo("/stores/1/products/5");
         assertThat(seen(get("/api/stores?region=SEOUL", null, Map.of())).get("service").asText()).isEqualTo("member-service");
+        JsonNode store = seen(get("/api/stores/3", null, Map.of()));
+        assertThat(store.get("service").asText()).isEqualTo("member-service");
+        assertThat(store.get("path").asText()).isEqualTo("/stores/3");
         assertThat(seen(get("/api/members/nickname-availability?nickname=Fresh01", null, Map.of())).get("path").asText())
                 .isEqualTo("/members/nickname-availability");
     }
@@ -207,9 +263,59 @@ class GatewayApplicationTests {
     @DisplayName("공개 경로라도 GET이 아니면 로그인이 필요하다")
     void publicPathNonGet_401() throws Exception {
         HttpResponse<String> res = http.send(HttpRequest.newBuilder(uri("/api/stores"))
-                .POST(HttpRequest.BodyPublishers.ofString("{}")).header("Content-Type", "application/json").build(),
+                .POST(HttpRequest.BodyPublishers.ofString("{}")).header("Content-Type", "application/json")
+                .header("X-Requested-With", "freshlink").build(),
                 HttpResponse.BodyHandlers.ofString());
         assertThat(res.statusCode()).isEqualTo(401);
+    }
+
+    // ------------------------------------------------------------------ BFF: 쿠키·CSRF·역할 거르기
+
+    @Test
+    @DisplayName("POST에 X-Requested-With: freshlink가 없으면 토큰이 맞아도 403")
+    void postWithoutCsrfHeader_403() throws Exception {
+        HttpResponse<String> res = http.send(HttpRequest.newBuilder(uri("/api/orders"))
+                .POST(HttpRequest.BodyPublishers.ofString("{}"))
+                .header("Content-Type", "application/json")
+                .header("Authorization", "Bearer " + customer()).build(), HttpResponse.BodyHandlers.ofString());
+        assertThat(res.statusCode()).isEqualTo(403);
+        assertThat(json.readTree(res.body()).get("code").asText()).isEqualTo("CSRF_HEADER_REQUIRED");
+
+        HttpResponse<String> wrong = http.send(HttpRequest.newBuilder(uri("/api/orders"))
+                .POST(HttpRequest.BodyPublishers.ofString("{}"))
+                .header("Content-Type", "application/json")
+                .header("X-Requested-With", "XMLHttpRequest")
+                .header("Authorization", "Bearer " + customer()).build(), HttpResponse.BodyHandlers.ofString());
+        assertThat(wrong.statusCode()).isEqualTo(403);
+    }
+
+    @Test
+    @DisplayName("Authorization 헤더가 없으면 fl_id 쿠키로 보호 경로를 통과한다")
+    void cookieToken_passesProtectedPath() throws Exception {
+        String sub = UUID.randomUUID().toString();
+        String token = token(KEY, c -> c.subject(sub).claim("cognito:groups", List.of("OWNER")).claim("custom:storeId", "3"));
+        JsonNode seen = seen(get("/api/owner/inventory", null, Map.of("Cookie", "fl_id=" + token)));
+        assertThat(seen.get("service").asText()).isEqualTo("inventory-service");
+        assertThat(header(seen, "X-User-Id")).containsExactly(sub);
+        assertThat(header(seen, "X-Store-Id")).containsExactly("3");
+    }
+
+    @Test
+    @DisplayName("fl_id 쿠키가 틀렸으면 401")
+    void badCookieToken_401() throws Exception {
+        String token = token(OTHER_KEY, c -> c.claim("cognito:groups", List.of("CUSTOMER")));
+        assertThat(get("/api/members/me", null, Map.of("Cookie", "fl_id=" + token)).statusCode()).isEqualTo(401);
+    }
+
+    @Test
+    @DisplayName("구글 사용자의 <UserPoolId>_Google 그룹은 X-User-Role에 넣지 않는다")
+    void googleGroup_filteredFromRole() throws Exception {
+        String token = token(KEY, c -> c.claim("cognito:groups", List.of("ap-northeast-2_TEST_Google", "CUSTOMER")));
+        JsonNode seen = seen(get("/api/members/me", token, Map.of()));
+        assertThat(header(seen, "X-User-Role")).containsExactly("CUSTOMER");
+
+        String onlyGoogle = token(KEY, c -> c.claim("cognito:groups", List.of("ap-northeast-2_TEST_Google")));
+        assertThat(header(seen(get("/api/members/me", onlyGoogle, Map.of())), "X-User-Role")).isEmpty();
     }
 
     @Test
@@ -220,6 +326,7 @@ class GatewayApplicationTests {
                 .POST(HttpRequest.BodyPublishers.ofString("{}"))
                 .header("Content-Type", "application/json")
                 .header("Authorization", "Bearer " + customer())
+                .header("X-Requested-With", "freshlink")
                 .header("Idempotency-Key", key).build(), HttpResponse.BodyHandlers.ofString());
         JsonNode seen = seen(res);
         assertThat(seen.get("service").asText()).isEqualTo("order-service");
@@ -232,9 +339,139 @@ class GatewayApplicationTests {
     void ownerOrdersAndAdminRoutes() throws Exception {
         assertThat(seen(get("/api/owner/orders", owner("2"), Map.of())).get("service").asText()).isEqualTo("order-service");
         assertThat(seen(get("/api/owner/disposals", owner("2"), Map.of())).get("service").asText()).isEqualTo("inventory-service");
+        JsonNode sales = seen(get("/api/owner/orders/sales?from=2026-10-30", owner("2"), Map.of()));
+        assertThat(sales.get("service").asText()).isEqualTo("order-service");
+        assertThat(sales.get("path").asText()).isEqualTo("/owner/orders/sales");
         JsonNode admin = seen(get("/api/admin/stores?page=0", groupToken("ADMIN", null), Map.of()));
         assertThat(admin.get("service").asText()).isEqualTo("member-service");
         assertThat(admin.get("path").asText()).isEqualTo("/admin/stores");
+    }
+
+    @Test
+    @DisplayName("점주 픽업 확인 POST는 order로 가고, 점주가 아니면 403")
+    void ownerPickup_routedToOrder() throws Exception {
+        HttpResponse<String> res = http.send(HttpRequest.newBuilder(uri("/api/owner/orders/7/pickup"))
+                .POST(HttpRequest.BodyPublishers.ofString("{}"))
+                .header("Content-Type", "application/json")
+                .header("Authorization", "Bearer " + owner("2"))
+                .header("X-Requested-With", "freshlink").build(), HttpResponse.BodyHandlers.ofString());
+        JsonNode seen = seen(res);
+        assertThat(seen.get("service").asText()).isEqualTo("order-service");
+        assertThat(seen.get("method").asText()).isEqualTo("POST");
+        assertThat(seen.get("path").asText()).isEqualTo("/owner/orders/7/pickup");
+        assertThat(header(seen, "X-Store-Id")).containsExactly("2");
+
+        HttpResponse<String> customer = http.send(HttpRequest.newBuilder(uri("/api/owner/orders/7/pickup"))
+                .POST(HttpRequest.BodyPublishers.ofString("{}"))
+                .header("Content-Type", "application/json")
+                .header("Authorization", "Bearer " + customer())
+                .header("X-Requested-With", "freshlink").build(), HttpResponse.BodyHandlers.ofString());
+        assertThat(customer.statusCode()).isEqualTo(403);
+        assertThat(get("/api/owner/orders/sales", customer(), Map.of()).statusCode()).isEqualTo(403);
+    }
+
+    @Test
+    @DisplayName("매출 SSE는 이벤트가 오는 대로 넘긴다 (모았다가 보내지 않는다)")
+    void ownerSalesStream_notBuffered() throws Exception {
+        long start = System.nanoTime();
+        HttpResponse<InputStream> res = http.send(HttpRequest.newBuilder(uri("/api/owner/orders/sales/stream"))
+                .header("Authorization", "Bearer " + owner("2"))
+                .header("Accept", "text/event-stream").GET().build(), HttpResponse.BodyHandlers.ofInputStream());
+        assertThat(res.statusCode()).isEqualTo(200);
+        assertThat(res.headers().firstValue("Content-Type")).hasValueSatisfying(v -> assertThat(v).startsWith("text/event-stream"));
+        try (BufferedReader body = new BufferedReader(new InputStreamReader(res.body(), StandardCharsets.UTF_8))) {
+            assertThat(body.readLine()).isEqualTo("data: first");
+            assertThat((System.nanoTime() - start) / 1_000_000).as("첫 이벤트까지 걸린 ms").isLessThan(1500);
+            body.readLine();
+            assertThat(body.readLine()).isEqualTo("data: second");
+        }
+    }
+
+    @Test
+    @DisplayName("알림 API는 로그인한 누구나 notification-service로 가고, 토큰이 없으면 401")
+    void notifications_routedForAnyLoggedInUser() throws Exception {
+        JsonNode customer = seen(get("/api/notifications?page=0", customer(), Map.of()));
+        assertThat(customer.get("service").asText()).isEqualTo("notification-service");
+        assertThat(customer.get("path").asText()).isEqualTo("/notifications");
+        assertThat(header(customer, "X-User-Role")).containsExactly("CUSTOMER");
+
+        JsonNode owner = seen(get("/api/notifications/unread-count", owner("2"), Map.of()));
+        assertThat(owner.get("path").asText()).isEqualTo("/notifications/unread-count");
+        assertThat(header(owner, "X-Store-Id")).containsExactly("2");
+
+        assertThat(get("/api/notifications", null, Map.of()).statusCode()).isEqualTo(401);
+        assertThat(get("/api/notifications/stream", null, Map.of()).statusCode()).isEqualTo(401);
+    }
+
+    @Test
+    @DisplayName("알림 SSE가 8개 열려 있어도 같은 서비스로 가는 다른 요청은 바로 간다 (연결 풀 서비스당 5개 기본값이면 3분 기다리다 504)")
+    void manyOpenStreams_doNotBlockOtherRequests() throws Exception {
+        List<CompletableFuture<HttpResponse<InputStream>>> streams = new java.util.ArrayList<>();
+        for (int i = 0; i < 8; i++) {
+            streams.add(http.sendAsync(HttpRequest.newBuilder(uri("/api/notifications/stream-hold"))
+                    .header("Authorization", "Bearer " + customer())
+                    .header("Accept", "text/event-stream").GET().build(), HttpResponse.BodyHandlers.ofInputStream()));
+        }
+        try {
+            for (CompletableFuture<HttpResponse<InputStream>> stream : streams) {
+                HttpResponse<InputStream> res = stream.get(5, java.util.concurrent.TimeUnit.SECONDS);
+                assertThat(res.statusCode()).isEqualTo(200);
+                assertThat(new BufferedReader(new InputStreamReader(res.body(), StandardCharsets.UTF_8)).readLine())
+                        .isEqualTo(":connected");
+            }
+            HttpResponse<String> count = http.send(HttpRequest.newBuilder(uri("/api/notifications/unread-count"))
+                    .header("Authorization", "Bearer " + customer())
+                    .timeout(java.time.Duration.ofSeconds(3)).GET().build(), HttpResponse.BodyHandlers.ofString());
+            assertThat(count.statusCode()).isEqualTo(200);
+            assertThat(json.readTree(count.body()).get("path").asText()).isEqualTo("/notifications/unread-count");
+        } finally {
+            streams.forEach(s -> s.thenAccept(res -> {
+                try {
+                    res.body().close();
+                } catch (IOException ignored) {
+                    // 테스트 정리
+                }
+            }));
+        }
+    }
+
+    @Test
+    @DisplayName("재입고 알림 신청 POST는 CSRF 헤더가 있으면 notification으로 간다")
+    void restockSubscribe_routedWithCsrf() throws Exception {
+        HttpResponse<String> res = http.send(HttpRequest.newBuilder(uri("/api/notifications/restock/15?storeId=1"))
+                .POST(HttpRequest.BodyPublishers.noBody())
+                .header("Authorization", "Bearer " + customer())
+                .header("X-Requested-With", "freshlink").build(), HttpResponse.BodyHandlers.ofString());
+        JsonNode seen = seen(res);
+        assertThat(seen.get("service").asText()).isEqualTo("notification-service");
+        assertThat(seen.get("method").asText()).isEqualTo("POST");
+        assertThat(seen.get("path").asText()).isEqualTo("/notifications/restock/15");
+
+        HttpResponse<String> noCsrf = http.send(HttpRequest.newBuilder(uri("/api/notifications/restock/15?storeId=1"))
+                .POST(HttpRequest.BodyPublishers.noBody())
+                .header("Authorization", "Bearer " + customer()).build(), HttpResponse.BodyHandlers.ofString());
+        assertThat(noCsrf.statusCode()).isEqualTo(403);
+    }
+
+    @Test
+    @DisplayName("알림 SSE는 이벤트가 오는 대로 넘긴다 (모았다가 보내지 않는다)")
+    void notificationStream_notBuffered() throws Exception {
+        long start = System.nanoTime();
+        HttpResponse<InputStream> res = http.send(HttpRequest.newBuilder(uri("/api/notifications/stream"))
+                .header("Authorization", "Bearer " + customer())
+                .header("Accept", "text/event-stream").GET().build(), HttpResponse.BodyHandlers.ofInputStream());
+        assertThat(res.statusCode()).isEqualTo(200);
+        assertThat(res.headers().firstValue("Content-Type")).hasValueSatisfying(v -> assertThat(v).startsWith("text/event-stream"));
+        try (BufferedReader body = new BufferedReader(new InputStreamReader(res.body(), StandardCharsets.UTF_8))) {
+            assertThat(body.readLine()).isEqualTo(":connected");
+            body.readLine();
+            assertThat(body.readLine()).isEqualTo("id:1");
+            body.readLine();
+            assertThat(body.readLine()).isEqualTo("data:first");
+            assertThat((System.nanoTime() - start) / 1_000_000).as("첫 이벤트까지 걸린 ms").isLessThan(1500);
+            body.readLine();
+            assertThat(body.readLine()).isEqualTo("id:2");
+        }
     }
 
     // ------------------------------------------------------------------ 추적 (할 일 16)
@@ -355,6 +592,7 @@ class GatewayApplicationTests {
                 body.put("headers", exchange.getRequestHeaders());
                 reply(exchange, 200, new ObjectMapper().writeValueAsString(body));
             });
+            server.setExecutor(Executors.newCachedThreadPool()); // SSE를 여러 개 붙잡아도 다른 요청을 받게
             server.start();
             return server;
         } catch (IOException e) {
