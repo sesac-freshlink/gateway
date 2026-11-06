@@ -260,6 +260,21 @@ class GatewayApplicationTests {
     }
 
     @Test
+    @DisplayName("주변 점포 재고는 토큰 없이 inventory로 가고, GET이 아니면 로그인이 필요하다")
+    void productStores_publicToInventory() throws Exception {
+        JsonNode seen = seen(get("/api/products/7/stores", null, Map.of("X-User-Id", "forged")));
+        assertThat(seen.get("service").asText()).isEqualTo("inventory-service");
+        assertThat(seen.get("path").asText()).isEqualTo("/products/7/stores");
+        assertThat(header(seen, "X-User-Id")).isEmpty();
+
+        HttpResponse<String> post = http.send(HttpRequest.newBuilder(uri("/api/products/7/stores"))
+                .POST(HttpRequest.BodyPublishers.ofString("{}")).header("Content-Type", "application/json")
+                .header("X-Requested-With", "freshlink").build(),
+                HttpResponse.BodyHandlers.ofString());
+        assertThat(post.statusCode()).isEqualTo(401);
+    }
+
+    @Test
     @DisplayName("공개 경로라도 GET이 아니면 로그인이 필요하다")
     void publicPathNonGet_401() throws Exception {
         HttpResponse<String> res = http.send(HttpRequest.newBuilder(uri("/api/stores"))
