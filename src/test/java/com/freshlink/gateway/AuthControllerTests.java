@@ -394,6 +394,29 @@ class AuthControllerTests {
     }
 
     @Test
+    @DisplayName("비밀번호 변경: 리프레시 쿠키의 사용자(fl_uid)가 로그인한 사용자와 다르면 401, Cognito를 부르지 않는다")
+    void password_otherUsersRefreshCookie_401() throws Exception {
+        String id = idToken(c -> c.claim("cognito:username", "me").claim("cognito:groups", List.of("CUSTOMER")));
+        HttpResponse<String> res = post("/api/auth/password", PASSWORD_BODY, "fl_id=" + id + "; fl_refresh=r; fl_uid=someone-else");
+
+        assertThat(res.statusCode()).isEqualTo(401);
+        assertThat(json.readTree(res.body()).get("code").asText()).isEqualTo("SESSION_EXPIRED");
+        verify(cognito, never()).adminInitiateAuth(any(AdminInitiateAuthRequest.class));
+        verify(cognito, never()).changePassword(any(ChangePasswordRequest.class));
+    }
+
+    @Test
+    @DisplayName("비밀번호 변경: 256자를 넘는 비밀번호는 400 INVALID_REQUEST, Cognito를 부르지 않는다")
+    void password_tooLong_400() throws Exception {
+        String body = "{\"currentPassword\":\"Old-pass1\",\"newPassword\":\"" + "A1!a".repeat(65) + "\"}";
+        HttpResponse<String> res = post("/api/auth/password", body, sessionCookie(UUID.randomUUID().toString()));
+
+        assertThat(res.statusCode()).isEqualTo(400);
+        assertThat(json.readTree(res.body()).get("code").asText()).isEqualTo("INVALID_REQUEST");
+        verify(cognito, never()).changePassword(any(ChangePasswordRequest.class));
+    }
+
+    @Test
     @DisplayName("비밀번호 변경: 관리자는 403 PASSWORD_CHANGE_NOT_ALLOWED, Cognito를 부르지 않는다")
     void password_admin_403() throws Exception {
         String id = idToken(c -> c.claim("cognito:groups", List.of("ADMIN")));

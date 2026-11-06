@@ -4,6 +4,7 @@ import com.freshlink.gateway.security.CognitoProperties;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Size;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -69,8 +70,9 @@ public class AuthController {
     public record ConfirmRequest(@NotBlank String email, @NotBlank String code) {
     }
 
-    /** A4 비밀번호 변경 요청. 새 비밀번호 규칙은 Cognito가 검사한다 (화면도 가입과 같은 규칙으로 먼저 검사) */
-    public record PasswordChangeRequest(@NotBlank String currentPassword, @NotBlank String newPassword) {
+    /** A4 비밀번호 변경 요청. 새 비밀번호 규칙은 Cognito가 검사한다 (화면도 가입과 같은 규칙으로 먼저 검사). 길이는 Cognito 최대 256자 */
+    public record PasswordChangeRequest(@NotBlank @Size(max = 256) String currentPassword,
+                                        @NotBlank @Size(max = 256) String newPassword) {
     }
 
     /** 이메일·비밀번호 로그인 → 200 사용자 정보 + 쿠키 3개 */
@@ -165,7 +167,9 @@ public class AuthController {
         }
         Optional<String> refreshToken = AuthCookies.read(request, AuthCookies.REFRESH_TOKEN);
         Optional<String> username = AuthCookies.read(request, AuthCookies.USERNAME);
-        if (refreshToken.isEmpty() || username.isEmpty()) {
+        // 리프레시 쿠키의 사용자가 지금 로그인(fl_id)한 사용자와 다르면 남의 세션으로 바꾸지 않게 막는다
+        if (refreshToken.isEmpty() || username.isEmpty()
+                || !username.get().equals(jwt.getClaimAsString("cognito:username"))) {
             return error(new AuthException(401, "SESSION_EXPIRED", "다시 로그인해 주세요"), AuthCookies.clearSession());
         }
         try {
