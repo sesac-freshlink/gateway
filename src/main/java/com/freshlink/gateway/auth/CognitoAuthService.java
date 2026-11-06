@@ -6,6 +6,7 @@ import java.security.InvalidKeyException;
 import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
 import java.util.Base64;
+import java.util.List;
 import java.util.Map;
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
@@ -57,6 +58,9 @@ import software.amazon.awssdk.services.cognitoidentityprovider.model.UsernameExi
 public class CognitoAuthService {
 
     private static final Logger log = LoggerFactory.getLogger(CognitoAuthService.class);
+
+    /** 모든 기기 로그아웃을 다시 시도하기 전에 쉬는 시간 (첫 시도 + 2번 더) */
+    static final List<Duration> SIGN_OUT_PAUSES = List.of(Duration.ofMillis(300), Duration.ofSeconds(1));
 
     private final CognitoIdentityProviderClient cognito;
     private final CognitoProperties props;
@@ -158,8 +162,10 @@ public class CognitoAuthService {
      * 비밀번호 변경 (member 추가 명세 A4). ChangePassword는 access token이 있어야 하는데 쿠키에는 ID 토큰만 있어서,
      * 리프레시 토큰으로 한 번 갱신해 받은 access token으로 바로 부른다. access token은 저장하지 않는다(쿠키·IAM 추가 없음).
      * 바꾼 뒤에는 같은 access token으로 GlobalSignOut을 불러 모든 기기를 로그아웃한다(명세 A4)
+     *
+     * @return 모든 기기 로그아웃까지 됐으면 true. 비밀번호는 바뀌었지만 로그아웃이 끝내 실패하면 false
      */
-    public void changePassword(String refreshToken, String username, String currentPassword, String newPassword) {
+    public boolean changePassword(String refreshToken, String username, String currentPassword, String newPassword) {
         String accessToken = refreshResult(refreshToken, username, "password-refresh").accessToken();
         try {
             cognito.changePassword(ChangePasswordRequest.builder()
@@ -176,23 +182,39 @@ public class CognitoAuthService {
         } catch (SdkException e) {
             throw mapCommon(e, "password");
         }
-        signOutEverywhere(accessToken, username);
+        return signOutEverywhere(accessToken, username);
     }
 
     /**
-     * 모든 기기 로그아웃(GlobalSignOut). 실패하면 한 번 더 시도하고, 그래도 실패하면 경고 로그만 남긴다.
-     * 비밀번호는 이미 바뀌었으므로 성공으로 처리한다(명세 A4, 11/6 결정). 로그에는 토큰을 남기지 않는다
+     * 모든 기기 로그아웃(GlobalSignOut). 3번까지 시도하고 사이에 0.3초·1초 쉰다. 다 실패하면 경고 로그를 남기고 false.
+     * 비밀번호는 이미 바뀌었으므로 실패로 돌리지 않고, 화면이 고객에게 알린다(명세 A4, 11/6 결정). 로그에는 토큰을 남기지 않는다
      */
-    private void signOutEverywhere(String accessToken, String username) {
-        for (int attempt = 1; attempt <= 2; attempt++) {
+    private boolean signOutEverywhere(String accessToken, String username) {
+        SdkException last = null;
+        for (int attempt = 0; attempt <= SIGN_OUT_PAUSES.size(); attempt++) {
+            if (attempt > 0 && !pause(SIGN_OUT_PAUSES.get(attempt - 1))) {
+                break;
+            }
             try {
                 cognito.globalSignOut(GlobalSignOutRequest.builder().accessToken(accessToken).build());
-                return;
+                return true;
             } catch (SdkException e) {
-                if (attempt == 2) {
-                    log.warn("비밀번호 변경 뒤 모든 기기 로그아웃 실패 user={} reason={}", username, e.getClass().getSimpleName());
-                }
+                last = e;
             }
+        }
+        log.warn("비밀번호 변경 뒤 모든 기기 로그아웃 실패 user={} reason={}", username,
+                last == null ? "interrupted" : last.getClass().getSimpleName());
+        return false;
+    }
+
+    /** 다시 시도 전에 쉰다. 스레드가 끊기면 false(더 시도하지 않는다) */
+    private static boolean pause(Duration duration) {
+        try {
+            Thread.sleep(duration.toMillis());
+            return true;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return false;
         }
     }
 

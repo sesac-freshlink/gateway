@@ -62,6 +62,7 @@ import software.amazon.awssdk.services.cognitoidentityprovider.model.ChangePassw
 import software.amazon.awssdk.services.cognitoidentityprovider.model.CodeMismatchException;
 import software.amazon.awssdk.services.cognitoidentityprovider.model.ConfirmSignUpRequest;
 import software.amazon.awssdk.services.cognitoidentityprovider.model.GlobalSignOutRequest;
+import software.amazon.awssdk.services.cognitoidentityprovider.model.GlobalSignOutResponse;
 import software.amazon.awssdk.services.cognitoidentityprovider.model.InternalErrorException;
 import software.amazon.awssdk.services.cognitoidentityprovider.model.InvalidPasswordException;
 import software.amazon.awssdk.services.cognitoidentityprovider.model.LimitExceededException;
@@ -379,18 +380,35 @@ class AuthControllerTests {
     }
 
     @Test
-    @DisplayName("비밀번호 변경: 모든 기기 로그아웃이 두 번 실패해도 비밀번호는 바뀌었으므로 204, 쿠키 지움")
-    void password_globalSignOutFails_still204() throws Exception {
+    @DisplayName("비밀번호 변경: 모든 기기 로그아웃이 3번 다 실패하면 200 otherDevicesSignedOut=false, 쿠키는 지움(비밀번호는 바뀜)")
+    void password_globalSignOutFailsThreeTimes_200Flag() throws Exception {
         when(cognito.adminInitiateAuth(any(AdminInitiateAuthRequest.class))).thenReturn(authResult("new-id", null, "access-1"));
         when(cognito.globalSignOut(any(GlobalSignOutRequest.class)))
                 .thenThrow(InternalErrorException.builder().message("x").build());
 
         HttpResponse<String> res = post("/api/auth/password", PASSWORD_BODY, sessionCookie(UUID.randomUUID().toString()));
 
-        assertThat(res.statusCode()).isEqualTo(204);
+        assertThat(res.statusCode()).isEqualTo(200);
+        assertThat(json.readTree(res.body()).get("otherDevicesSignedOut").asBoolean(true)).isFalse();
         assertCleared(res);
         verify(cognito).changePassword(any(ChangePasswordRequest.class));
-        verify(cognito, times(2)).globalSignOut(any(GlobalSignOutRequest.class));
+        verify(cognito, times(3)).globalSignOut(any(GlobalSignOutRequest.class));
+    }
+
+    @Test
+    @DisplayName("비밀번호 변경: 모든 기기 로그아웃이 두 번 실패한 뒤 세 번째에 되면 204")
+    void password_globalSignOutSucceedsOnRetry_204() throws Exception {
+        when(cognito.adminInitiateAuth(any(AdminInitiateAuthRequest.class))).thenReturn(authResult("new-id", null, "access-1"));
+        when(cognito.globalSignOut(any(GlobalSignOutRequest.class)))
+                .thenThrow(InternalErrorException.builder().message("x").build())
+                .thenThrow(InternalErrorException.builder().message("x").build())
+                .thenReturn(GlobalSignOutResponse.builder().build());
+
+        HttpResponse<String> res = post("/api/auth/password", PASSWORD_BODY, sessionCookie(UUID.randomUUID().toString()));
+
+        assertThat(res.statusCode()).isEqualTo(204);
+        assertCleared(res);
+        verify(cognito, times(3)).globalSignOut(any(GlobalSignOutRequest.class));
     }
 
     @Test

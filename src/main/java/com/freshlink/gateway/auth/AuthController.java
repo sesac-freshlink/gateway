@@ -152,7 +152,8 @@ public class AuthController {
     /**
      * A4 비밀번호 변경 → 204. 로그인(fl_id)이 있어야 하고, 리프레시 쿠키로 access token을 받아 Cognito ChangePassword를 부른다.
      * 구글 가입 계정은 403 PASSWORD_LOGIN_ONLY, 관리자는 403 PASSWORD_CHANGE_NOT_ALLOWED(Cognito를 부르지 않는다).
-     * 바꾸면 모든 기기에서 로그아웃하고 로그인 쿠키를 지운다(명세 A4)
+     * 바꾸면 모든 기기에서 로그아웃하고 로그인 쿠키를 지운다(명세 A4). 모든 기기 로그아웃이 3번 다 실패하면
+     * 200 {"otherDevicesSignedOut": false}로 알린다(비밀번호는 바뀜)
      */
     @PostMapping("/password")
     public ResponseEntity<?> changePassword(@AuthenticationPrincipal Jwt jwt, HttpServletRequest request,
@@ -173,8 +174,14 @@ public class AuthController {
             return error(new AuthException(401, "SESSION_EXPIRED", "다시 로그인해 주세요"), AuthCookies.clearSession());
         }
         try {
-            cognito.changePassword(refreshToken.get(), username.get(), req.currentPassword(), req.newPassword());
-            return ResponseEntity.noContent().headers(AuthCookies.clearSession()).build();
+            boolean signedOut = cognito.changePassword(refreshToken.get(), username.get(), req.currentPassword(),
+                    req.newPassword());
+            if (signedOut) {
+                return ResponseEntity.noContent().headers(AuthCookies.clearSession()).build();
+            }
+            // 비밀번호는 바뀌었지만 다른 기기 로그아웃은 실패: 화면이 고객에게 알리게 표시를 붙인다
+            return ResponseEntity.ok().headers(AuthCookies.clearSession())
+                    .body(Map.of("otherDevicesSignedOut", false));
         } catch (AuthException e) {
             if (e.status() == 401) {
                 return error(e, AuthCookies.clearSession());
