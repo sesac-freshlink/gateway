@@ -32,6 +32,13 @@ spring:
                 - Method=GET
               filters:
                 - StripPrefix=1
+            - id: inventory-product-stores          # 1-1. 공개. 주변 점포 재고(11/4 멘토링, 이태우)
+              uri: ${INVENTORY_SERVICE_URI:http://inventory-service:8080}
+              predicates:
+                - Path=/api/products/{productId}/stores
+                - Method=GET
+              filters:
+                - StripPrefix=1
             - id: member-stores                     # 2. 공개
               uri: ${MEMBER_SERVICE_URI:http://member-service:8080}
               predicates:

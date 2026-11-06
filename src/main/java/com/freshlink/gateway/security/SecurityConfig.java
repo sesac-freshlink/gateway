@@ -61,6 +61,7 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.GET,
                                 "/api/stores/{storeId}/products",
                                 "/api/stores/{storeId}/products/{productId}",
+                                "/api/products/{productId}/stores",
                                 "/api/stores",
                                 "/api/stores/{storeId}",
                                 "/api/members/nickname-availability").permitAll()
