@@ -69,6 +69,10 @@ public class AuthController {
     public record ConfirmRequest(@NotBlank String email, @NotBlank String code) {
     }
 
+    /** A4 비밀번호 변경 요청. 새 비밀번호 규칙은 Cognito가 검사한다 (화면도 가입과 같은 규칙으로 먼저 검사) */
+    public record PasswordChangeRequest(@NotBlank String currentPassword, @NotBlank String newPassword) {
+    }
+
     /** 이메일·비밀번호 로그인 → 200 사용자 정보 + 쿠키 3개 */
     @PostMapping("/login")
     public ResponseEntity<AuthUser> login(@Valid @RequestBody LoginRequest req) {
@@ -141,6 +145,33 @@ public class AuthController {
                 .build()
                 .toUri();
         return ResponseEntity.status(HttpStatus.FOUND).location(logout).build();
+    }
+
+    /**
+     * A4 비밀번호 변경 → 204. 로그인(fl_id)이 있어야 하고, 리프레시 쿠키로 access token을 받아 Cognito ChangePassword를 부른다.
+     * 구글 가입 계정은 403 PASSWORD_LOGIN_ONLY. 바꾼 뒤에도 지금 쿠키(로그인)는 그대로 둔다
+     */
+    @PostMapping("/password")
+    public ResponseEntity<?> changePassword(@AuthenticationPrincipal Jwt jwt, HttpServletRequest request,
+                                            @Valid @RequestBody PasswordChangeRequest req) {
+        if (AuthUser.isFederated(jwt)) {
+            return error(new AuthException(403, "PASSWORD_LOGIN_ONLY", "구글로 가입한 계정은 비밀번호가 없습니다"),
+                    new HttpHeaders());
+        }
+        Optional<String> refreshToken = AuthCookies.read(request, AuthCookies.REFRESH_TOKEN);
+        Optional<String> username = AuthCookies.read(request, AuthCookies.USERNAME);
+        if (refreshToken.isEmpty() || username.isEmpty()) {
+            return error(new AuthException(401, "SESSION_EXPIRED", "다시 로그인해 주세요"), AuthCookies.clearSession());
+        }
+        try {
+            cognito.changePassword(refreshToken.get(), username.get(), req.currentPassword(), req.newPassword());
+            return ResponseEntity.noContent().build();
+        } catch (AuthException e) {
+            if (e.status() == 401) {
+                return error(e, AuthCookies.clearSession());
+            }
+            throw e;
+        }
     }
 
     /** 새로 고침 뒤 로그인 복원. fl_id가 없거나 만료면 보안 설정이 먼저 401을 준다 */

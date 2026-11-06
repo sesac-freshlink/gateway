@@ -10,8 +10,9 @@ import org.springframework.security.oauth2.jwt.Jwt;
  * @param role    ADMIN·OWNER·CUSTOMER 중 하나. 그룹이 여럿이면 앞쪽(ADMIN > OWNER > CUSTOMER)
  * @param storeId 점주만 있다 (custom:storeId)
  * @param email   이메일
+ * @param passwordLogin 이메일·비밀번호로 가입한 계정인지. 구글 가입 계정은 false (비밀번호 변경 메뉴를 숨긴다, A4)
  */
-public record AuthUser(String userId, String role, String storeId, String email) {
+public record AuthUser(String userId, String role, String storeId, String email, boolean passwordLogin) {
 
     /** 화면 claims.ts와 같은 순서 */
     static final List<String> ROLES = List.of("ADMIN", "OWNER", "CUSTOMER");
@@ -27,6 +28,18 @@ public record AuthUser(String userId, String role, String storeId, String email)
             return null;
         }
         return new AuthUser(idToken.getSubject(), role,
-                idToken.getClaimAsString("custom:storeId"), idToken.getClaimAsString("email"));
+                idToken.getClaimAsString("custom:storeId"), idToken.getClaimAsString("email"), !isFederated(idToken));
+    }
+
+    /**
+     * 구글 등 외부 로그인으로 만든 계정인지. Cognito는 이런 계정의 ID 토큰에 identities를 넣고
+     * {userPoolId}_Google 같은 그룹에 넣는다
+     */
+    static boolean isFederated(Jwt idToken) {
+        if (idToken.hasClaim("identities")) {
+            return true;
+        }
+        List<String> groups = idToken.getClaimAsStringList("cognito:groups");
+        return groups != null && groups.stream().anyMatch(g -> g.endsWith("_Google"));
     }
 }

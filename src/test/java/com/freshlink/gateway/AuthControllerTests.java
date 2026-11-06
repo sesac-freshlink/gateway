@@ -57,8 +57,11 @@ import software.amazon.awssdk.services.cognitoidentityprovider.model.AdminInitia
 import software.amazon.awssdk.services.cognitoidentityprovider.model.AdminInitiateAuthResponse;
 import software.amazon.awssdk.services.cognitoidentityprovider.model.AuthFlowType;
 import software.amazon.awssdk.services.cognitoidentityprovider.model.AuthenticationResultType;
+import software.amazon.awssdk.services.cognitoidentityprovider.model.ChangePasswordRequest;
 import software.amazon.awssdk.services.cognitoidentityprovider.model.CodeMismatchException;
 import software.amazon.awssdk.services.cognitoidentityprovider.model.ConfirmSignUpRequest;
+import software.amazon.awssdk.services.cognitoidentityprovider.model.InvalidPasswordException;
+import software.amazon.awssdk.services.cognitoidentityprovider.model.LimitExceededException;
 import software.amazon.awssdk.services.cognitoidentityprovider.model.NotAuthorizedException;
 import software.amazon.awssdk.services.cognitoidentityprovider.model.RevokeTokenRequest;
 import software.amazon.awssdk.services.cognitoidentityprovider.model.SignUpRequest;
@@ -322,8 +325,119 @@ class AuthControllerTests {
         assertThat(body.get("role").asText()).isEqualTo("CUSTOMER");
         assertThat(body.get("storeId").isNull()).isTrue();
         assertThat(body.get("email").asText()).isEqualTo("g@gmail.com");
+        assertThat(body.get("passwordLogin").asBoolean()).isFalse();
 
         assertThat(get("/api/auth/me", null).statusCode()).isEqualTo(401);
+    }
+
+    @Test
+    @DisplayName("me: 이메일 가입 계정은 passwordLogin true, identities가 있으면 false")
+    void me_passwordLogin() throws Exception {
+        String email = idToken(c -> c.claim("cognito:groups", List.of("OWNER")).claim("custom:storeId", "7"));
+        assertThat(json.readTree(get("/api/auth/me", "fl_id=" + email).body()).get("passwordLogin").asBoolean()).isTrue();
+
+        String federated = idToken(c -> c.claim("cognito:groups", List.of("CUSTOMER"))
+                .claim("identities", List.of(Map.of("providerName", "Google"))));
+        assertThat(json.readTree(get("/api/auth/me", "fl_id=" + federated).body()).get("passwordLogin").asBoolean()).isFalse();
+    }
+
+    // ------------------------------------------------------------------ 비밀번호 변경 (A4)
+
+    static final String PASSWORD_BODY = "{\"currentPassword\":\"Old-pass1\",\"newPassword\":\"New-pass1\"}";
+
+    String sessionCookie(String username) throws Exception {
+        String id = idToken(c -> c.claim("cognito:username", username).claim("cognito:groups", List.of("CUSTOMER")));
+        return "fl_id=" + id + "; fl_refresh=refresh-1; fl_uid=" + username;
+    }
+
+    @Test
+    @DisplayName("비밀번호 변경 성공: 리프레시로 받은 access token으로 ChangePassword, 204, 쿠키는 그대로")
+    void password_success() throws Exception {
+        String username = UUID.randomUUID().toString();
+        when(cognito.adminInitiateAuth(any(AdminInitiateAuthRequest.class))).thenReturn(authResult("new-id", null, "access-1"));
+
+        HttpResponse<String> res = post("/api/auth/password", PASSWORD_BODY, sessionCookie(username));
+
+        assertThat(res.statusCode()).isEqualTo(204);
+        assertThat(res.headers().allValues("Set-Cookie")).isEmpty();
+        ArgumentCaptor<AdminInitiateAuthRequest> refresh = ArgumentCaptor.forClass(AdminInitiateAuthRequest.class);
+        verify(cognito).adminInitiateAuth(refresh.capture());
+        assertThat(refresh.getValue().authFlow()).isEqualTo(AuthFlowType.REFRESH_TOKEN_AUTH);
+        assertThat(refresh.getValue().authParameters()).containsEntry("REFRESH_TOKEN", "refresh-1")
+                .containsEntry("SECRET_HASH", secretHash(username));
+        ArgumentCaptor<ChangePasswordRequest> change = ArgumentCaptor.forClass(ChangePasswordRequest.class);
+        verify(cognito).changePassword(change.capture());
+        assertThat(change.getValue().accessToken()).isEqualTo("access-1");
+        assertThat(change.getValue().previousPassword()).isEqualTo("Old-pass1");
+        assertThat(change.getValue().proposedPassword()).isEqualTo("New-pass1");
+    }
+
+    @Test
+    @DisplayName("비밀번호 변경 실패: 현재 비밀번호 틀림 400, 규칙 위반 400, 너무 많음 429. 쿠키는 그대로")
+    void password_cognitoErrors() throws Exception {
+        String cookie = sessionCookie(UUID.randomUUID().toString());
+        when(cognito.adminInitiateAuth(any(AdminInitiateAuthRequest.class))).thenReturn(authResult("new-id", null, "access-1"));
+
+        doThrow(NotAuthorizedException.builder().message("x").build()).when(cognito).changePassword(any(ChangePasswordRequest.class));
+        HttpResponse<String> wrong = post("/api/auth/password", PASSWORD_BODY, cookie);
+        assertThat(wrong.statusCode()).isEqualTo(400);
+        assertThat(json.readTree(wrong.body()).get("code").asText()).isEqualTo("WRONG_CURRENT_PASSWORD");
+        assertThat(wrong.headers().allValues("Set-Cookie")).isEmpty();
+
+        doThrow(InvalidPasswordException.builder().message("x").build()).when(cognito).changePassword(any(ChangePasswordRequest.class));
+        HttpResponse<String> invalid = post("/api/auth/password", PASSWORD_BODY, cookie);
+        assertThat(invalid.statusCode()).isEqualTo(400);
+        assertThat(json.readTree(invalid.body()).get("code").asText()).isEqualTo("INVALID_PASSWORD");
+
+        doThrow(LimitExceededException.builder().message("x").build()).when(cognito).changePassword(any(ChangePasswordRequest.class));
+        HttpResponse<String> limit = post("/api/auth/password", PASSWORD_BODY, cookie);
+        assertThat(limit.statusCode()).isEqualTo(429);
+        assertThat(json.readTree(limit.body()).get("code").asText()).isEqualTo("TOO_MANY_ATTEMPTS");
+    }
+
+    @Test
+    @DisplayName("비밀번호 변경: 리프레시가 만료면 401 SESSION_EXPIRED + 쿠키 지움, 리프레시 쿠키가 없어도 401")
+    void password_sessionExpired_401() throws Exception {
+        when(cognito.adminInitiateAuth(any(AdminInitiateAuthRequest.class)))
+                .thenThrow(NotAuthorizedException.builder().message("x").build());
+        HttpResponse<String> res = post("/api/auth/password", PASSWORD_BODY, sessionCookie(UUID.randomUUID().toString()));
+        assertThat(res.statusCode()).isEqualTo(401);
+        assertThat(json.readTree(res.body()).get("code").asText()).isEqualTo("SESSION_EXPIRED");
+        assertCleared(res);
+        verify(cognito, never()).changePassword(any(ChangePasswordRequest.class));
+
+        String id = idToken(c -> c.claim("cognito:groups", List.of("CUSTOMER")));
+        HttpResponse<String> noRefresh = post("/api/auth/password", PASSWORD_BODY, "fl_id=" + id);
+        assertThat(noRefresh.statusCode()).isEqualTo(401);
+        assertCleared(noRefresh);
+    }
+
+    @Test
+    @DisplayName("비밀번호 변경: 구글 가입 계정은 403 PASSWORD_LOGIN_ONLY, Cognito를 부르지 않는다")
+    void password_google_403() throws Exception {
+        String id = idToken(c -> c.claim("cognito:groups", List.of("CUSTOMER", POOL_ID + "_Google")));
+        HttpResponse<String> res = post("/api/auth/password", PASSWORD_BODY, "fl_id=" + id + "; fl_refresh=r; fl_uid=google_1");
+        assertThat(res.statusCode()).isEqualTo(403);
+        assertThat(json.readTree(res.body()).get("code").asText()).isEqualTo("PASSWORD_LOGIN_ONLY");
+        verify(cognito, never()).adminInitiateAuth(any(AdminInitiateAuthRequest.class));
+        verify(cognito, never()).changePassword(any(ChangePasswordRequest.class));
+    }
+
+    @Test
+    @DisplayName("비밀번호 변경: 로그인 안 하면 401, 빈 값이면 400, X-Requested-With가 없으면 403")
+    void password_guards() throws Exception {
+        assertThat(post("/api/auth/password", PASSWORD_BODY, null).statusCode()).isEqualTo(401);
+
+        String cookie = sessionCookie(UUID.randomUUID().toString());
+        HttpResponse<String> blank = post("/api/auth/password", "{\"currentPassword\":\"\",\"newPassword\":\"x\"}", cookie);
+        assertThat(blank.statusCode()).isEqualTo(400);
+
+        HttpResponse<String> noCsrf = http.send(HttpRequest.newBuilder(uri("/api/auth/password"))
+                .POST(HttpRequest.BodyPublishers.ofString(PASSWORD_BODY))
+                .header("Content-Type", "application/json").header("Cookie", cookie).build(),
+                HttpResponse.BodyHandlers.ofString());
+        assertThat(noCsrf.statusCode()).isEqualTo(403);
+        verify(cognito, never()).changePassword(any(ChangePasswordRequest.class));
     }
 
     // ------------------------------------------------------------------ 구글 로그인
@@ -475,8 +589,13 @@ class AuthControllerTests {
     }
 
     static AdminInitiateAuthResponse authResult(String idToken, String refreshToken) {
+        return authResult(idToken, refreshToken, null);
+    }
+
+    static AdminInitiateAuthResponse authResult(String idToken, String refreshToken, String accessToken) {
         return AdminInitiateAuthResponse.builder().authenticationResult(AuthenticationResultType.builder()
-                .idToken(idToken).refreshToken(refreshToken).expiresIn(3600).tokenType("Bearer").build()).build();
+                .idToken(idToken).refreshToken(refreshToken).accessToken(accessToken).expiresIn(3600).tokenType("Bearer")
+                .build()).build();
     }
 
     /** Cognito ID 토큰 모양 (aud = bff 클라이언트) */

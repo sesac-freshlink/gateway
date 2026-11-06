@@ -26,6 +26,7 @@ import software.amazon.awssdk.services.cognitoidentityprovider.model.AliasExists
 import software.amazon.awssdk.services.cognitoidentityprovider.model.AttributeType;
 import software.amazon.awssdk.services.cognitoidentityprovider.model.AuthFlowType;
 import software.amazon.awssdk.services.cognitoidentityprovider.model.AuthenticationResultType;
+import software.amazon.awssdk.services.cognitoidentityprovider.model.ChangePasswordRequest;
 import software.amazon.awssdk.services.cognitoidentityprovider.model.CodeMismatchException;
 import software.amazon.awssdk.services.cognitoidentityprovider.model.ConfirmSignUpRequest;
 import software.amazon.awssdk.services.cognitoidentityprovider.model.ExpiredCodeException;
@@ -149,6 +150,34 @@ public class CognitoAuthService {
      * (이메일 가입자는 sub UUID, 구글 가입자는 google_숫자). 실패하면 401
      */
     public Tokens refresh(String refreshToken, String username) {
+        return tokens(refreshResult(refreshToken, username, "refresh"));
+    }
+
+    /**
+     * 비밀번호 변경 (member 추가 명세 A4). ChangePassword는 access token이 있어야 하는데 쿠키에는 ID 토큰만 있어서,
+     * 리프레시 토큰으로 한 번 갱신해 받은 access token으로 바로 부른다. access token은 저장하지 않는다(쿠키·IAM 추가 없음)
+     */
+    public void changePassword(String refreshToken, String username, String currentPassword, String newPassword) {
+        String accessToken = refreshResult(refreshToken, username, "password-refresh").accessToken();
+        try {
+            cognito.changePassword(ChangePasswordRequest.builder()
+                    .accessToken(accessToken)
+                    .previousPassword(currentPassword)
+                    .proposedPassword(newPassword)
+                    .build());
+        } catch (NotAuthorizedException e) {
+            throw new AuthException(400, "WRONG_CURRENT_PASSWORD", "현재 비밀번호가 맞지 않습니다");
+        } catch (InvalidPasswordException | InvalidParameterException e) {
+            throw new AuthException(400, "INVALID_PASSWORD", "비밀번호 규칙을 확인해 주세요");
+        } catch (TooManyRequestsException | LimitExceededException | TooManyFailedAttemptsException e) {
+            throw new AuthException(429, "TOO_MANY_ATTEMPTS", "시도가 너무 많습니다. 잠시 뒤 다시 시도해 주세요");
+        } catch (SdkException e) {
+            throw mapCommon(e, "password");
+        }
+    }
+
+    /** REFRESH_TOKEN_AUTH. 실패하면 401 SESSION_EXPIRED */
+    private AuthenticationResultType refreshResult(String refreshToken, String username, String action) {
         try {
             AdminInitiateAuthResponse res = cognito.adminInitiateAuth(AdminInitiateAuthRequest.builder()
                     .userPoolId(props.userPoolId())
@@ -161,11 +190,11 @@ public class CognitoAuthService {
             if (res.authenticationResult() == null) {
                 throw new AuthException(401, "SESSION_EXPIRED", "다시 로그인해 주세요");
             }
-            return tokens(res.authenticationResult());
+            return res.authenticationResult();
         } catch (NotAuthorizedException | UserNotFoundException e) {
             throw new AuthException(401, "SESSION_EXPIRED", "다시 로그인해 주세요");
         } catch (SdkException e) {
-            throw mapCommon(e, "refresh");
+            throw mapCommon(e, action);
         }
     }
 
