@@ -31,6 +31,12 @@ public record AuthUser(String userId, String role, String storeId, String email,
                 idToken.getClaimAsString("custom:storeId"), idToken.getClaimAsString("email"), !isFederated(idToken));
     }
 
+    /** 관리자 그룹에 든 계정인지 (A4: 관리자는 비밀번호 변경 대상이 아니다) */
+    static boolean isAdmin(Jwt idToken) {
+        List<String> groups = idToken.getClaimAsStringList("cognito:groups");
+        return groups != null && groups.contains("ADMIN");
+    }
+
     /**
      * 구글 등 외부 로그인으로 만든 계정인지. Cognito는 이런 계정의 ID 토큰에 identities를 넣고
      * {userPoolId}_Google 같은 그룹에 넣는다

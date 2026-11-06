@@ -30,6 +30,7 @@ import software.amazon.awssdk.services.cognitoidentityprovider.model.ChangePassw
 import software.amazon.awssdk.services.cognitoidentityprovider.model.CodeMismatchException;
 import software.amazon.awssdk.services.cognitoidentityprovider.model.ConfirmSignUpRequest;
 import software.amazon.awssdk.services.cognitoidentityprovider.model.ExpiredCodeException;
+import software.amazon.awssdk.services.cognitoidentityprovider.model.GlobalSignOutRequest;
 import software.amazon.awssdk.services.cognitoidentityprovider.model.InvalidParameterException;
 import software.amazon.awssdk.services.cognitoidentityprovider.model.InvalidPasswordException;
 import software.amazon.awssdk.services.cognitoidentityprovider.model.LimitExceededException;
@@ -155,7 +156,8 @@ public class CognitoAuthService {
 
     /**
      * 비밀번호 변경 (member 추가 명세 A4). ChangePassword는 access token이 있어야 하는데 쿠키에는 ID 토큰만 있어서,
-     * 리프레시 토큰으로 한 번 갱신해 받은 access token으로 바로 부른다. access token은 저장하지 않는다(쿠키·IAM 추가 없음)
+     * 리프레시 토큰으로 한 번 갱신해 받은 access token으로 바로 부른다. access token은 저장하지 않는다(쿠키·IAM 추가 없음).
+     * 바꾼 뒤에는 같은 access token으로 GlobalSignOut을 불러 모든 기기를 로그아웃한다(명세 A4)
      */
     public void changePassword(String refreshToken, String username, String currentPassword, String newPassword) {
         String accessToken = refreshResult(refreshToken, username, "password-refresh").accessToken();
@@ -173,6 +175,24 @@ public class CognitoAuthService {
             throw new AuthException(429, "TOO_MANY_ATTEMPTS", "시도가 너무 많습니다. 잠시 뒤 다시 시도해 주세요");
         } catch (SdkException e) {
             throw mapCommon(e, "password");
+        }
+        signOutEverywhere(accessToken, username);
+    }
+
+    /**
+     * 모든 기기 로그아웃(GlobalSignOut). 실패하면 한 번 더 시도하고, 그래도 실패하면 경고 로그만 남긴다.
+     * 비밀번호는 이미 바뀌었으므로 성공으로 처리한다(명세 A4, 11/6 결정). 로그에는 토큰을 남기지 않는다
+     */
+    private void signOutEverywhere(String accessToken, String username) {
+        for (int attempt = 1; attempt <= 2; attempt++) {
+            try {
+                cognito.globalSignOut(GlobalSignOutRequest.builder().accessToken(accessToken).build());
+                return;
+            } catch (SdkException e) {
+                if (attempt == 2) {
+                    log.warn("비밀번호 변경 뒤 모든 기기 로그아웃 실패 user={} reason={}", username, e.getClass().getSimpleName());
+                }
+            }
         }
     }
 

@@ -149,13 +149,18 @@ public class AuthController {
 
     /**
      * A4 비밀번호 변경 → 204. 로그인(fl_id)이 있어야 하고, 리프레시 쿠키로 access token을 받아 Cognito ChangePassword를 부른다.
-     * 구글 가입 계정은 403 PASSWORD_LOGIN_ONLY. 바꾼 뒤에도 지금 쿠키(로그인)는 그대로 둔다
+     * 구글 가입 계정은 403 PASSWORD_LOGIN_ONLY, 관리자는 403 PASSWORD_CHANGE_NOT_ALLOWED(Cognito를 부르지 않는다).
+     * 바꾸면 모든 기기에서 로그아웃하고 로그인 쿠키를 지운다(명세 A4)
      */
     @PostMapping("/password")
     public ResponseEntity<?> changePassword(@AuthenticationPrincipal Jwt jwt, HttpServletRequest request,
                                             @Valid @RequestBody PasswordChangeRequest req) {
         if (AuthUser.isFederated(jwt)) {
             return error(new AuthException(403, "PASSWORD_LOGIN_ONLY", "구글로 가입한 계정은 비밀번호가 없습니다"),
+                    new HttpHeaders());
+        }
+        if (AuthUser.isAdmin(jwt)) {
+            return error(new AuthException(403, "PASSWORD_CHANGE_NOT_ALLOWED", "관리자 계정은 비밀번호를 바꿀 수 없어요"),
                     new HttpHeaders());
         }
         Optional<String> refreshToken = AuthCookies.read(request, AuthCookies.REFRESH_TOKEN);
@@ -165,7 +170,7 @@ public class AuthController {
         }
         try {
             cognito.changePassword(refreshToken.get(), username.get(), req.currentPassword(), req.newPassword());
-            return ResponseEntity.noContent().build();
+            return ResponseEntity.noContent().headers(AuthCookies.clearSession()).build();
         } catch (AuthException e) {
             if (e.status() == 401) {
                 return error(e, AuthCookies.clearSession());

@@ -5,6 +5,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.reset;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -60,6 +61,8 @@ import software.amazon.awssdk.services.cognitoidentityprovider.model.Authenticat
 import software.amazon.awssdk.services.cognitoidentityprovider.model.ChangePasswordRequest;
 import software.amazon.awssdk.services.cognitoidentityprovider.model.CodeMismatchException;
 import software.amazon.awssdk.services.cognitoidentityprovider.model.ConfirmSignUpRequest;
+import software.amazon.awssdk.services.cognitoidentityprovider.model.GlobalSignOutRequest;
+import software.amazon.awssdk.services.cognitoidentityprovider.model.InternalErrorException;
 import software.amazon.awssdk.services.cognitoidentityprovider.model.InvalidPasswordException;
 import software.amazon.awssdk.services.cognitoidentityprovider.model.LimitExceededException;
 import software.amazon.awssdk.services.cognitoidentityprovider.model.NotAuthorizedException;
@@ -351,7 +354,7 @@ class AuthControllerTests {
     }
 
     @Test
-    @DisplayName("비밀번호 변경 성공: 리프레시로 받은 access token으로 ChangePassword, 204, 쿠키는 그대로")
+    @DisplayName("비밀번호 변경 성공: 리프레시로 받은 access token으로 ChangePassword → GlobalSignOut, 204, 로그인 쿠키 지움")
     void password_success() throws Exception {
         String username = UUID.randomUUID().toString();
         when(cognito.adminInitiateAuth(any(AdminInitiateAuthRequest.class))).thenReturn(authResult("new-id", null, "access-1"));
@@ -359,7 +362,7 @@ class AuthControllerTests {
         HttpResponse<String> res = post("/api/auth/password", PASSWORD_BODY, sessionCookie(username));
 
         assertThat(res.statusCode()).isEqualTo(204);
-        assertThat(res.headers().allValues("Set-Cookie")).isEmpty();
+        assertCleared(res);
         ArgumentCaptor<AdminInitiateAuthRequest> refresh = ArgumentCaptor.forClass(AdminInitiateAuthRequest.class);
         verify(cognito).adminInitiateAuth(refresh.capture());
         assertThat(refresh.getValue().authFlow()).isEqualTo(AuthFlowType.REFRESH_TOKEN_AUTH);
@@ -370,10 +373,40 @@ class AuthControllerTests {
         assertThat(change.getValue().accessToken()).isEqualTo("access-1");
         assertThat(change.getValue().previousPassword()).isEqualTo("Old-pass1");
         assertThat(change.getValue().proposedPassword()).isEqualTo("New-pass1");
+        ArgumentCaptor<GlobalSignOutRequest> signOut = ArgumentCaptor.forClass(GlobalSignOutRequest.class);
+        verify(cognito).globalSignOut(signOut.capture());
+        assertThat(signOut.getValue().accessToken()).isEqualTo("access-1");
     }
 
     @Test
-    @DisplayName("비밀번호 변경 실패: 현재 비밀번호 틀림 400, 규칙 위반 400, 너무 많음 429. 쿠키는 그대로")
+    @DisplayName("비밀번호 변경: 모든 기기 로그아웃이 두 번 실패해도 비밀번호는 바뀌었으므로 204, 쿠키 지움")
+    void password_globalSignOutFails_still204() throws Exception {
+        when(cognito.adminInitiateAuth(any(AdminInitiateAuthRequest.class))).thenReturn(authResult("new-id", null, "access-1"));
+        when(cognito.globalSignOut(any(GlobalSignOutRequest.class)))
+                .thenThrow(InternalErrorException.builder().message("x").build());
+
+        HttpResponse<String> res = post("/api/auth/password", PASSWORD_BODY, sessionCookie(UUID.randomUUID().toString()));
+
+        assertThat(res.statusCode()).isEqualTo(204);
+        assertCleared(res);
+        verify(cognito).changePassword(any(ChangePasswordRequest.class));
+        verify(cognito, times(2)).globalSignOut(any(GlobalSignOutRequest.class));
+    }
+
+    @Test
+    @DisplayName("비밀번호 변경: 관리자는 403 PASSWORD_CHANGE_NOT_ALLOWED, Cognito를 부르지 않는다")
+    void password_admin_403() throws Exception {
+        String id = idToken(c -> c.claim("cognito:groups", List.of("ADMIN")));
+        HttpResponse<String> res = post("/api/auth/password", PASSWORD_BODY, "fl_id=" + id + "; fl_refresh=r; fl_uid=admin");
+        assertThat(res.statusCode()).isEqualTo(403);
+        assertThat(json.readTree(res.body()).get("code").asText()).isEqualTo("PASSWORD_CHANGE_NOT_ALLOWED");
+        assertThat(res.headers().allValues("Set-Cookie")).isEmpty();
+        verify(cognito, never()).adminInitiateAuth(any(AdminInitiateAuthRequest.class));
+        verify(cognito, never()).changePassword(any(ChangePasswordRequest.class));
+    }
+
+    @Test
+    @DisplayName("비밀번호 변경 실패: 현재 비밀번호 틀림 400, 규칙 위반 400, 너무 많음 429. 쿠키는 그대로, 로그아웃 안 함")
     void password_cognitoErrors() throws Exception {
         String cookie = sessionCookie(UUID.randomUUID().toString());
         when(cognito.adminInitiateAuth(any(AdminInitiateAuthRequest.class))).thenReturn(authResult("new-id", null, "access-1"));
@@ -393,6 +426,7 @@ class AuthControllerTests {
         HttpResponse<String> limit = post("/api/auth/password", PASSWORD_BODY, cookie);
         assertThat(limit.statusCode()).isEqualTo(429);
         assertThat(json.readTree(limit.body()).get("code").asText()).isEqualTo("TOO_MANY_ATTEMPTS");
+        verify(cognito, never()).globalSignOut(any(GlobalSignOutRequest.class));
     }
 
     @Test
