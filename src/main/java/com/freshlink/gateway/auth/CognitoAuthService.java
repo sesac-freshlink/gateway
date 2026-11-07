@@ -6,6 +6,7 @@ import java.security.InvalidKeyException;
 import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
 import java.util.Base64;
+import java.util.List;
 import java.util.Map;
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
@@ -26,9 +27,11 @@ import software.amazon.awssdk.services.cognitoidentityprovider.model.AliasExists
 import software.amazon.awssdk.services.cognitoidentityprovider.model.AttributeType;
 import software.amazon.awssdk.services.cognitoidentityprovider.model.AuthFlowType;
 import software.amazon.awssdk.services.cognitoidentityprovider.model.AuthenticationResultType;
+import software.amazon.awssdk.services.cognitoidentityprovider.model.ChangePasswordRequest;
 import software.amazon.awssdk.services.cognitoidentityprovider.model.CodeMismatchException;
 import software.amazon.awssdk.services.cognitoidentityprovider.model.ConfirmSignUpRequest;
 import software.amazon.awssdk.services.cognitoidentityprovider.model.ExpiredCodeException;
+import software.amazon.awssdk.services.cognitoidentityprovider.model.GlobalSignOutRequest;
 import software.amazon.awssdk.services.cognitoidentityprovider.model.InvalidParameterException;
 import software.amazon.awssdk.services.cognitoidentityprovider.model.InvalidPasswordException;
 import software.amazon.awssdk.services.cognitoidentityprovider.model.LimitExceededException;
@@ -55,6 +58,9 @@ import software.amazon.awssdk.services.cognitoidentityprovider.model.UsernameExi
 public class CognitoAuthService {
 
     private static final Logger log = LoggerFactory.getLogger(CognitoAuthService.class);
+
+    /** 모든 기기 로그아웃을 다시 시도하기 전에 쉬는 시간 (첫 시도 + 2번 더) */
+    static final List<Duration> SIGN_OUT_PAUSES = List.of(Duration.ofMillis(300), Duration.ofSeconds(1));
 
     private final CognitoIdentityProviderClient cognito;
     private final CognitoProperties props;
@@ -149,6 +155,71 @@ public class CognitoAuthService {
      * (이메일 가입자는 sub UUID, 구글 가입자는 google_숫자). 실패하면 401
      */
     public Tokens refresh(String refreshToken, String username) {
+        return tokens(refreshResult(refreshToken, username, "refresh"));
+    }
+
+    /**
+     * 비밀번호 변경 (member 추가 명세 A4). ChangePassword는 access token이 있어야 하는데 쿠키에는 ID 토큰만 있어서,
+     * 리프레시 토큰으로 한 번 갱신해 받은 access token으로 바로 부른다. access token은 저장하지 않는다(쿠키·IAM 추가 없음).
+     * 바꾼 뒤에는 같은 access token으로 GlobalSignOut을 불러 모든 기기를 로그아웃한다(명세 A4)
+     *
+     * @return 모든 기기 로그아웃까지 됐으면 true. 비밀번호는 바뀌었지만 로그아웃이 끝내 실패하면 false
+     */
+    public boolean changePassword(String refreshToken, String username, String currentPassword, String newPassword) {
+        String accessToken = refreshResult(refreshToken, username, "password-refresh").accessToken();
+        try {
+            cognito.changePassword(ChangePasswordRequest.builder()
+                    .accessToken(accessToken)
+                    .previousPassword(currentPassword)
+                    .proposedPassword(newPassword)
+                    .build());
+        } catch (NotAuthorizedException e) {
+            throw new AuthException(400, "WRONG_CURRENT_PASSWORD", "현재 비밀번호가 맞지 않습니다");
+        } catch (InvalidPasswordException | InvalidParameterException e) {
+            throw new AuthException(400, "INVALID_PASSWORD", "비밀번호 규칙을 확인해 주세요");
+        } catch (TooManyRequestsException | LimitExceededException | TooManyFailedAttemptsException e) {
+            throw new AuthException(429, "TOO_MANY_ATTEMPTS", "시도가 너무 많습니다. 잠시 뒤 다시 시도해 주세요");
+        } catch (SdkException e) {
+            throw mapCommon(e, "password");
+        }
+        return signOutEverywhere(accessToken, username);
+    }
+
+    /**
+     * 모든 기기 로그아웃(GlobalSignOut). 3번까지 시도하고 사이에 0.3초·1초 쉰다. 다 실패하면 경고 로그를 남기고 false.
+     * 비밀번호는 이미 바뀌었으므로 실패로 돌리지 않고, 화면이 고객에게 알린다(명세 A4, 11/6 결정). 로그에는 토큰을 남기지 않는다
+     */
+    private boolean signOutEverywhere(String accessToken, String username) {
+        SdkException last = null;
+        for (int attempt = 0; attempt <= SIGN_OUT_PAUSES.size(); attempt++) {
+            if (attempt > 0 && !pause(SIGN_OUT_PAUSES.get(attempt - 1))) {
+                break;
+            }
+            try {
+                cognito.globalSignOut(GlobalSignOutRequest.builder().accessToken(accessToken).build());
+                return true;
+            } catch (SdkException e) {
+                last = e;
+            }
+        }
+        log.warn("비밀번호 변경 뒤 모든 기기 로그아웃 실패 user={} reason={}", username,
+                last == null ? "interrupted" : last.getClass().getSimpleName());
+        return false;
+    }
+
+    /** 다시 시도 전에 쉰다. 스레드가 끊기면 false(더 시도하지 않는다) */
+    private static boolean pause(Duration duration) {
+        try {
+            Thread.sleep(duration.toMillis());
+            return true;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return false;
+        }
+    }
+
+    /** REFRESH_TOKEN_AUTH. 실패하면 401 SESSION_EXPIRED */
+    private AuthenticationResultType refreshResult(String refreshToken, String username, String action) {
         try {
             AdminInitiateAuthResponse res = cognito.adminInitiateAuth(AdminInitiateAuthRequest.builder()
                     .userPoolId(props.userPoolId())
@@ -161,11 +232,11 @@ public class CognitoAuthService {
             if (res.authenticationResult() == null) {
                 throw new AuthException(401, "SESSION_EXPIRED", "다시 로그인해 주세요");
             }
-            return tokens(res.authenticationResult());
+            return res.authenticationResult();
         } catch (NotAuthorizedException | UserNotFoundException e) {
             throw new AuthException(401, "SESSION_EXPIRED", "다시 로그인해 주세요");
         } catch (SdkException e) {
-            throw mapCommon(e, "refresh");
+            throw mapCommon(e, action);
         }
     }
 

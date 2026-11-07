@@ -12,7 +12,7 @@ import org.springframework.util.StringUtils;
  * 헤더는 PowerShell 시험용으로 남긴다(aud가 bff인 토큰만 통과한다).
  * <p>
  * 로그인·갱신·로그아웃 같은 /api/auth 공개 경로에서는 쿠키를 읽지 않는다. 만료된 fl_id가 남아 있어도
- * 갱신·로그아웃이 401로 막히지 않게 하려는 것이다. /api/auth/me는 로그인이 필요하므로 쿠키를 읽는다.
+ * 갱신·로그아웃이 401로 막히지 않게 하려는 것이다. /api/auth/me·/api/auth/password는 로그인이 필요하므로 쿠키를 읽는다.
  */
 final class CookieBearerTokenResolver implements BearerTokenResolver {
 
@@ -25,7 +25,7 @@ final class CookieBearerTokenResolver implements BearerTokenResolver {
             return token;
         }
         String uri = request.getRequestURI();
-        if (uri.startsWith("/api/auth/") && !uri.equals("/api/auth/me")) {
+        if (uri.startsWith("/api/auth/") && !uri.equals("/api/auth/me") && !uri.equals("/api/auth/password")) {
             return null;
         }
         Cookie[] cookies = request.getCookies();
