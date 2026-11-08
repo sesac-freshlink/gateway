@@ -4,6 +4,7 @@ import com.freshlink.gateway.security.CognitoProperties;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Size;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -67,6 +68,11 @@ public class AuthController {
     }
 
     public record ConfirmRequest(@NotBlank String email, @NotBlank String code) {
+    }
+
+    /** A4 비밀번호 변경 요청. 새 비밀번호 규칙은 Cognito가 검사한다 (화면도 가입과 같은 규칙으로 먼저 검사). 길이는 Cognito 최대 256자 */
+    public record PasswordChangeRequest(@NotBlank @Size(max = 256) String currentPassword,
+                                        @NotBlank @Size(max = 256) String newPassword) {
     }
 
     /** 이메일·비밀번호 로그인 → 200 사용자 정보 + 쿠키 3개 */
@@ -141,6 +147,47 @@ public class AuthController {
                 .build()
                 .toUri();
         return ResponseEntity.status(HttpStatus.FOUND).location(logout).build();
+    }
+
+    /**
+     * A4 비밀번호 변경 → 204. 로그인(fl_id)이 있어야 하고, 리프레시 쿠키로 access token을 받아 Cognito ChangePassword를 부른다.
+     * 구글 가입 계정은 403 PASSWORD_LOGIN_ONLY, 관리자는 403 PASSWORD_CHANGE_NOT_ALLOWED(Cognito를 부르지 않는다).
+     * 바꾸면 모든 기기에서 로그아웃하고 로그인 쿠키를 지운다(명세 A4). 모든 기기 로그아웃이 3번 다 실패하면
+     * 200 {"otherDevicesSignedOut": false}로 알린다(비밀번호는 바뀜)
+     */
+    @PostMapping("/password")
+    public ResponseEntity<?> changePassword(@AuthenticationPrincipal Jwt jwt, HttpServletRequest request,
+                                            @Valid @RequestBody PasswordChangeRequest req) {
+        if (AuthUser.isFederated(jwt)) {
+            return error(new AuthException(403, "PASSWORD_LOGIN_ONLY", "구글로 가입한 계정은 비밀번호가 없습니다"),
+                    new HttpHeaders());
+        }
+        if (AuthUser.isAdmin(jwt)) {
+            return error(new AuthException(403, "PASSWORD_CHANGE_NOT_ALLOWED", "관리자 계정은 비밀번호를 바꿀 수 없어요"),
+                    new HttpHeaders());
+        }
+        Optional<String> refreshToken = AuthCookies.read(request, AuthCookies.REFRESH_TOKEN);
+        Optional<String> username = AuthCookies.read(request, AuthCookies.USERNAME);
+        // 리프레시 쿠키의 사용자가 지금 로그인(fl_id)한 사용자와 다르면 남의 세션으로 바꾸지 않게 막는다
+        if (refreshToken.isEmpty() || username.isEmpty()
+                || !username.get().equals(jwt.getClaimAsString("cognito:username"))) {
+            return error(new AuthException(401, "SESSION_EXPIRED", "다시 로그인해 주세요"), AuthCookies.clearSession());
+        }
+        try {
+            boolean signedOut = cognito.changePassword(refreshToken.get(), username.get(), req.currentPassword(),
+                    req.newPassword());
+            if (signedOut) {
+                return ResponseEntity.noContent().headers(AuthCookies.clearSession()).build();
+            }
+            // 비밀번호는 바뀌었지만 다른 기기 로그아웃은 실패: 화면이 고객에게 알리게 표시를 붙인다
+            return ResponseEntity.ok().headers(AuthCookies.clearSession())
+                    .body(Map.of("otherDevicesSignedOut", false));
+        } catch (AuthException e) {
+            if (e.status() == 401) {
+                return error(e, AuthCookies.clearSession());
+            }
+            throw e;
+        }
     }
 
     /** 새로 고침 뒤 로그인 복원. fl_id가 없거나 만료면 보안 설정이 먼저 401을 준다 */
