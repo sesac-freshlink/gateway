@@ -350,6 +350,28 @@ class GatewayApplicationTests {
     }
 
     @Test
+    @DisplayName("점주 내 점포 경로는 member로 가고 OWNER만 통과")
+    void ownerStore_routedToMember() throws Exception {
+        JsonNode store = seen(get("/api/owner/store", owner("2"), Map.of()));
+        assertThat(store.get("service").asText()).isEqualTo("member-service");
+        assertThat(store.get("path").asText()).isEqualTo("/owner/store");
+        assertThat(header(store, "X-Store-Id")).containsExactly("2");
+        HttpResponse<String> put = http.send(HttpRequest.newBuilder(uri("/api/owner/store"))
+                .PUT(HttpRequest.BodyPublishers.ofString("{\"name\":\"x\"}"))
+                .header("Content-Type", "application/json")
+                .header("Authorization", "Bearer " + owner("2"))
+                .header("X-Requested-With", "freshlink").build(), HttpResponse.BodyHandlers.ofString());
+        JsonNode updated = seen(put);
+        assertThat(updated.get("service").asText()).isEqualTo("member-service");
+        assertThat(updated.get("method").asText()).isEqualTo("PUT");
+        JsonNode upload = seen(get("/api/owner/store/image-upload-url?contentType=image/png", owner("2"), Map.of()));
+        assertThat(upload.get("service").asText()).isEqualTo("member-service");
+        assertThat(upload.get("path").asText()).isEqualTo("/owner/store/image-upload-url");
+        assertThat(get("/api/owner/store", customer(), Map.of()).statusCode()).isEqualTo(403);
+        assertThat(get("/api/owner/store", null, Map.of()).statusCode()).isEqualTo(401);
+    }
+
+    @Test
     @DisplayName("점주 주문과 관리자 경로")
     void ownerOrdersAndAdminRoutes() throws Exception {
         assertThat(seen(get("/api/owner/orders", owner("2"), Map.of())).get("service").asText()).isEqualTo("order-service");

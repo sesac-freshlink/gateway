@@ -64,6 +64,12 @@ spring:
                 - Path=/api/owner/inventory/**,/api/owner/disposals
               filters:
                 - StripPrefix=1
+            - id: member-owner-store                # 7-1. OWNER. 점주 내 점포 조회·수정·이미지 업로드 URL (member #31)
+              uri: ${MEMBER_SERVICE_URI:http://member-service:8080}
+              predicates:
+                - Path=/api/owner/store/**          # /api/owner/store 자체도 포함
+              filters:
+                - StripPrefix=1
             - id: order-owner                       # 8. OWNER
               uri: ${ORDER_SERVICE_URI:http://order-service:8080}
               predicates:

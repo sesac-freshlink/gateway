@@ -50,6 +50,7 @@ flowchart LR
    | 5 | `/api/admin/**` | 전부 | member-service | 로그인 | ADMIN |
    | 6 | `/api/owner/inventory/**`, `/api/owner/disposals` | 전부 | inventory-service | 로그인 | OWNER |
    | 7 | `/api/owner/orders/**` | 전부 | order-service | 로그인 | OWNER |
+   | 7-1 | `/api/owner/store/**` (점주 내 점포, 이미지 업로드 URL) | 전부 | member-service | 로그인 | OWNER |
    | 8 | `/api/orders/**` | 전부 | order-service | 로그인 | CUSTOMER |
    | 9 | `/api/notifications/**` | 전부 | notification-service | 로그인 | (서비스가 고객·점주를 나눈다) |
    | - | `/ops/**`, 그 밖의 경로 | - | 라우트 없음 | 막음 | |
