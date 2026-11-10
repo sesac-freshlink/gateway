@@ -260,6 +260,21 @@ class GatewayApplicationTests {
     }
 
     @Test
+    @DisplayName("주변 점포 재고는 토큰 없이 inventory로 가고, GET이 아니면 로그인이 필요하다")
+    void productStores_publicToInventory() throws Exception {
+        JsonNode seen = seen(get("/api/products/7/stores", null, Map.of("X-User-Id", "forged")));
+        assertThat(seen.get("service").asText()).isEqualTo("inventory-service");
+        assertThat(seen.get("path").asText()).isEqualTo("/products/7/stores");
+        assertThat(header(seen, "X-User-Id")).isEmpty();
+
+        HttpResponse<String> post = http.send(HttpRequest.newBuilder(uri("/api/products/7/stores"))
+                .POST(HttpRequest.BodyPublishers.ofString("{}")).header("Content-Type", "application/json")
+                .header("X-Requested-With", "freshlink").build(),
+                HttpResponse.BodyHandlers.ofString());
+        assertThat(post.statusCode()).isEqualTo(401);
+    }
+
+    @Test
     @DisplayName("공개 경로라도 GET이 아니면 로그인이 필요하다")
     void publicPathNonGet_401() throws Exception {
         HttpResponse<String> res = http.send(HttpRequest.newBuilder(uri("/api/stores"))
@@ -332,6 +347,28 @@ class GatewayApplicationTests {
         assertThat(seen.get("service").asText()).isEqualTo("order-service");
         assertThat(seen.get("method").asText()).isEqualTo("POST");
         assertThat(header(seen, "Idempotency-Key")).containsExactly(key);
+    }
+
+    @Test
+    @DisplayName("점주 내 점포 경로는 member로 가고 OWNER만 통과")
+    void ownerStore_routedToMember() throws Exception {
+        JsonNode store = seen(get("/api/owner/store", owner("2"), Map.of()));
+        assertThat(store.get("service").asText()).isEqualTo("member-service");
+        assertThat(store.get("path").asText()).isEqualTo("/owner/store");
+        assertThat(header(store, "X-Store-Id")).containsExactly("2");
+        HttpResponse<String> put = http.send(HttpRequest.newBuilder(uri("/api/owner/store"))
+                .PUT(HttpRequest.BodyPublishers.ofString("{\"name\":\"x\"}"))
+                .header("Content-Type", "application/json")
+                .header("Authorization", "Bearer " + owner("2"))
+                .header("X-Requested-With", "freshlink").build(), HttpResponse.BodyHandlers.ofString());
+        JsonNode updated = seen(put);
+        assertThat(updated.get("service").asText()).isEqualTo("member-service");
+        assertThat(updated.get("method").asText()).isEqualTo("PUT");
+        JsonNode upload = seen(get("/api/owner/store/image-upload-url?contentType=image/png", owner("2"), Map.of()));
+        assertThat(upload.get("service").asText()).isEqualTo("member-service");
+        assertThat(upload.get("path").asText()).isEqualTo("/owner/store/image-upload-url");
+        assertThat(get("/api/owner/store", customer(), Map.of()).statusCode()).isEqualTo(403);
+        assertThat(get("/api/owner/store", null, Map.of()).statusCode()).isEqualTo(401);
     }
 
     @Test

@@ -32,6 +32,13 @@ spring:
                 - Method=GET
               filters:
                 - StripPrefix=1
+            - id: inventory-product-stores          # 1-1. 공개. 주변 점포 재고(11/4 멘토링, 이태우)
+              uri: ${INVENTORY_SERVICE_URI:http://inventory-service:8080}
+              predicates:
+                - Path=/api/products/{productId}/stores
+                - Method=GET
+              filters:
+                - StripPrefix=1
             - id: member-stores                     # 2. 공개
               uri: ${MEMBER_SERVICE_URI:http://member-service:8080}
               predicates:
@@ -55,6 +62,12 @@ spring:
               uri: ${INVENTORY_SERVICE_URI:http://inventory-service:8080}
               predicates:
                 - Path=/api/owner/inventory/**,/api/owner/disposals
+              filters:
+                - StripPrefix=1
+            - id: member-owner-store                # 7-1. OWNER. 점주 내 점포 조회·수정·이미지 업로드 URL (member #31)
+              uri: ${MEMBER_SERVICE_URI:http://member-service:8080}
+              predicates:
+                - Path=/api/owner/store/**          # /api/owner/store 자체도 포함
               filters:
                 - StripPrefix=1
             - id: order-owner                       # 8. OWNER
