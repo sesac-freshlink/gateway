@@ -1,6 +1,6 @@
 # 프론트 (frontend)
 
-`freshlink-pipeline` 1단계에서 frontend를 고칠 때만 읽는다. 스택·폴더·금지 사항(red flags)은 frontend `CLAUDE.md`가 기준이다.
+`freshlink-pipeline` 1단계에서 frontend를 고칠 때만 읽는다. 스택·폴더·금지 사항(red flags)은 frontend `CLAUDE.md`가 기준이다. frontend는 멘토님이 만든 자체 에이전트·파이프라인을 쓰는 레포라, frontend 폴더에서 연 세션은 그 레포 규칙을 따른다. 이 파일은 다른 레포에서 연 세션이 frontend를 함께 고칠 때 쓴다.
 
 ## 검증
 
