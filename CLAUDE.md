@@ -45,7 +45,7 @@ Claude 하나가 `.claude/skills/freshlink-pipeline/SKILL.md` 순서대로 직�
 ✅ Spring Cloud Gateway WebMVC(서블릿) 기반. 서비스 3개와 같은 바탕이라 Servlet API(HttpServletRequest, OncePerRequestFilter)를 그대로 쓴다. WebFlux(Mono·Flux) 쓰지 않는다 (10/15 팀 합의)
 ✅ 토큰 검증: issuer-uri(${COGNITO_ISSUER_URI})로 JWKS, RS256·exp·iss + token_use = id + aud = ${COGNITO_CLIENT_ID}. 공유 비밀 키 금지
 ✅ /api/owner/** 는 cognito:groups에 OWNER 필요 (없으면 403, 토큰 문제는 401)
-✅ 공개 경로는 점포 검색·점포 상품 목록만 (README 3장). 넓히지 않는다
+✅ 공개 경로는 점포 검색·점포 상품 목록과 고객 홈 배너 목록(GET /api/members/banners)만 (README 3장). 넓히지 않는다
 ✅ 클라이언트가 보낸 X-User-Id·X-User-Role·X-Store-Id는 먼저 지우고 토큰 값으로 다시 채운다
 ✅ 라우팅은 README 라우팅 표 기준, /api 접두사를 떼고 넘긴다. 소유권 확인은 서비스 몫
 ⛔ 토큰 원문·Authorization 헤더를 로그에 남기지 않는다

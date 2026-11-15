@@ -64,7 +64,9 @@ public class SecurityConfig {
                                 "/api/products/{productId}/stores",
                                 "/api/stores",
                                 "/api/stores/{storeId}",
-                                "/api/members/nickname-availability").permitAll()
+                                "/api/members/nickname-availability",
+                                // 고객 홈 메인 배너는 로그인 없이 본다(11/15 김경우 결정). 쓰기(/api/admin/banners)는 그대로 ADMIN
+                                "/api/members/banners").permitAll()
                         .requestMatchers("/api/admin/**").hasRole("ADMIN")
                         .requestMatchers("/api/owner/**").hasRole("OWNER")
                         .requestMatchers("/api/orders/**").hasRole("CUSTOMER")
