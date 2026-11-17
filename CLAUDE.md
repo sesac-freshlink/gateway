@@ -11,15 +11,13 @@
 | `README.md` | 이 레포의 기능·API·데이터 모델·폴더 구조·dev 환경 실행 (진실) |
 | `.github` 레포 `docs/기획/기획안-및-설계도.md` | 기능 ID, 메시지 명세, 데이터 모델 |
 | `.github` 레포 `CONTRIBUTING.md` | 브랜치·커밋·PR 규칙 |
-| `.github` 레포 `docs/팀원-가이드/ai-agents.md` | 백엔드 에이전트 플러그인(`freshlink-backend`) 설치·사용법 (사람용) |
+| `.github` 레포 `docs/팀원-가이드/ai-agents.md` | Claude Code 작업 방식: 에이전트 하나 + `freshlink-pipeline` 스킬 (사람용) |
 
 이 `CLAUDE.md`는 AI 작업 규칙만 담는다. 위 문서와 겹치는 사실은 위 문서가 진실.
 
-## 에이전트
+## 작업 방식
 
-백엔드 에이전트 7개와 작업 순서는 `freshlink-backend` 플러그인에 있다 (`.github` 레포에서 배포). 새 기능 요청이면 `backend-pipeline` 스킬을 먼저 읽고 그 순서대로 서브에이전트를 쓴다. 플러그인이 설치되어 있지 않으면 사용자에게 `.github` 레포 `docs/팀원-가이드/ai-agents.md`의 설치 명령을 안내한다.
-
-서브에이전트 산출물(`_workspace/*.md`)은 짧게(표·불릿). 레포에 커밋되는 것(README, 코드 주석, PR 본문)은 평이한 한국어 문장(`~한다` 체).
+Claude 하나가 `.claude/skills/freshlink-pipeline/SKILL.md` 순서대로 직접 한다: 크기 정하기 → 이해 → 계획 → 구현 → 검증 → 자체 리뷰 → 커밋·PR. 작은 일은 계획·리뷰를 건너뛴다. 서브에이전트에게 일을 넘기지 않는다(예외는 스킬에 적힌 경우만). `_workspace/` 파일을 만들지 않는다. 이 레포 규칙(이 파일)이 스킬보다 우선이다.
 
 ---
 
@@ -47,7 +45,7 @@
 ✅ Spring Cloud Gateway WebMVC(서블릿) 기반. 서비스 3개와 같은 바탕이라 Servlet API(HttpServletRequest, OncePerRequestFilter)를 그대로 쓴다. WebFlux(Mono·Flux) 쓰지 않는다 (10/15 팀 합의)
 ✅ 토큰 검증: issuer-uri(${COGNITO_ISSUER_URI})로 JWKS, RS256·exp·iss + token_use = id + aud = ${COGNITO_CLIENT_ID}. 공유 비밀 키 금지
 ✅ /api/owner/** 는 cognito:groups에 OWNER 필요 (없으면 403, 토큰 문제는 401)
-✅ 공개 경로는 점포 검색·점포 상품 목록만 (README 3장). 넓히지 않는다
+✅ 공개 경로는 점포 검색·점포 상품 목록과 고객 홈 배너 목록(GET /api/members/banners)만 (README 3장). 넓히지 않는다
 ✅ 클라이언트가 보낸 X-User-Id·X-User-Role·X-Store-Id는 먼저 지우고 토큰 값으로 다시 채운다
 ✅ 라우팅은 README 라우팅 표 기준, /api 접두사를 떼고 넘긴다. 소유권 확인은 서비스 몫
 ⛔ 토큰 원문·Authorization 헤더를 로그에 남기지 않는다
